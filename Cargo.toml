@@ -36,8 +36,9 @@ euclid = { version = "0.22", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "logging", "std", "tls12"], optional = true }
 # The published crates.io package does not expose Servo's workspace-only
 # `bundled` convenience alias. Reproduce it explicitly with its published
-# component features, and keep Servo's Windows ANGLE/no-WGL path enabled.
-servo = { version = "=0.5.0", default-features = false, features = ["baked-in-resources", "bundled_freetype", "no-wgl"], optional = true }
+# component features. `js_jit` is important here: without it mozjs_sys forces
+# a local SpiderMonkey source build on Windows and requires MozTools/LLVM.
+servo = { version = "=0.5.0", default-features = false, features = ["baked-in-resources", "bundled_freetype", "js_jit", "no-wgl"], optional = true }
 webrender_api = { version = "0.70", optional = true }
 winit = { version = "0.30.13", optional = true }
 
