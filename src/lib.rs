@@ -3,6 +3,7 @@ pub mod compatibility;
 pub mod diagnostics;
 pub mod engine;
 pub mod input;
+pub mod jit_residency;
 pub mod lifecycle;
 pub mod network;
 pub mod protocol;
@@ -19,6 +20,10 @@ pub use compatibility::{
 pub use diagnostics::{BridgeDiagnosticEvent, DiagnosticRing};
 pub use engine::{EngineAdapter, EngineError, LiveWebEngine};
 pub use input::{MappedPoint, Ray, SpatialInputTranslator, SpatialNodeGeometry};
+pub use jit_residency::{
+    GovernedRef, HydratedObject, JitResidencyClient, JitResidencyError, JitResidencyMetrics,
+    ResidencyConsumer, ResidencyScope, VaultJitTransport,
+};
 pub use lifecycle::{LifecyclePolicy, VisibilitySample};
 pub use network::{
     NetworkAction, NetworkRouteBlock, NetworkRouter, ResourceDecision, ResourceRequest,
