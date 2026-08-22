@@ -5,6 +5,17 @@ edition = "2021"
 license = "Proprietary"
 description = "Renderer-independent adaptive web compatibility bridge for the Neroa spatial browser."
 
+[features]
+default = []
+servo-runtime = [
+    "dep:embedder_traits",
+    "dep:euclid",
+    "dep:rustls",
+    "dep:servo",
+    "dep:webrender_api",
+    "dep:winit",
+]
+
 [dependencies]
 async-trait = "0.1"
 glam = "0.30"
@@ -18,5 +29,19 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
+# Real Servo integration is deliberately optional until the native host is
+# proven on every platform. Default bridge/JIT tests stay lightweight.
+embedder_traits = { package = "servo-embedder-traits", version = "=0.5.0", optional = true }
+euclid = { version = "0.22", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "logging", "std", "tls12"], optional = true }
+servo = { version = "=0.5.0", default-features = false, features = ["bundled", "no-wgl"], optional = true }
+webrender_api = { version = "0.70", optional = true }
+winit = { version = "0.30.13", optional = true }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[[bin]]
+name = "servo-smoke"
+path = "src/bin/servo_smoke.rs"
+required-features = ["servo-runtime"]
