@@ -126,7 +126,10 @@ impl VaultJitTransport for FakeVaultTransport {
 #[test]
 fn governed_refs_must_be_namespaced() {
     let invalid = GovernedRef::new("raw-memory-id");
-    assert!(matches!(invalid, Err(JitResidencyError::InvalidReference(_))));
+    assert!(matches!(
+        invalid,
+        Err(JitResidencyError::InvalidReference(_))
+    ));
 
     let valid = GovernedRef::new("memory:source:hash").unwrap();
     assert_eq!(valid.reference, "memory:source:hash");

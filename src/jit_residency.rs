@@ -276,9 +276,7 @@ impl<T: VaultJitTransport> JitResidencyClient<T> {
         max_depth: u32,
     ) -> Result<Vec<HydratedObject>, JitResidencyError> {
         root.validate()?;
-        self.transport
-            .traverse(&self.scope, root, max_depth)
-            .await
+        self.transport.traverse(&self.scope, root, max_depth).await
     }
 
     pub async fn prefetch(
@@ -300,10 +298,7 @@ impl<T: VaultJitTransport> JitResidencyClient<T> {
         self.transport.unpin(&self.scope, reference).await
     }
 
-    pub async fn mark_dirty(
-        &self,
-        reference: &GovernedRef,
-    ) -> Result<(), JitResidencyError> {
+    pub async fn mark_dirty(&self, reference: &GovernedRef) -> Result<(), JitResidencyError> {
         reference.validate()?;
         self.transport.mark_dirty(&self.scope, reference).await
     }
@@ -313,10 +308,7 @@ impl<T: VaultJitTransport> JitResidencyClient<T> {
         self.transport.release(&self.scope, reference).await
     }
 
-    pub async fn is_resident(
-        &self,
-        reference: &GovernedRef,
-    ) -> Result<bool, JitResidencyError> {
+    pub async fn is_resident(&self, reference: &GovernedRef) -> Result<bool, JitResidencyError> {
         reference.validate()?;
         self.transport.is_resident(&self.scope, reference).await
     }
