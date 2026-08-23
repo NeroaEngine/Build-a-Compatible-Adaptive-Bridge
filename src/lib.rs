@@ -33,7 +33,9 @@ pub use network::{
 pub use receipt::{JsonlReceiptSink, MemoryReceiptSink, Receipt, ReceiptSink};
 pub use router::{AdaptiveRouter, RouteDecision, RouteRule, RouterConfig};
 #[cfg(feature = "servo-runtime")]
-pub use servo_runtime::ServoEngineProxy;
+pub use servo_runtime::{
+    NoopServoHostNotifier, ServoEngineProxy, ServoHost, ServoHostNotifier,
+};
 pub use state_broker::{BrokeredState, StateBrokerError, StateContinuityBroker};
 pub use supervisor::{
     BrowserLifecycleSupervisor, RuntimeRecord, SupervisorConfig, SupervisorDecision,
