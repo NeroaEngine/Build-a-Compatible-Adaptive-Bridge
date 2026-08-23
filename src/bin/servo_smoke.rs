@@ -91,8 +91,6 @@ impl ApplicationHandler<WakerEvent> for App {
             .build();
         servo.setup_logging();
 
-        // EventLoopProxy must be created from the original EventLoop. The Waker
-        // already owns one, so clone it here rather than asking ActiveEventLoop.
         let host_event_proxy = waker.0.clone();
         let notifier: Arc<dyn ServoHostNotifier> = Arc::new(move || {
             let _ = host_event_proxy.send_event(WakerEvent::Drive);
@@ -159,7 +157,6 @@ impl ApplicationHandler<WakerEvent> for App {
             WakerEvent::ViewCreated(result) => match result {
                 Ok(view_id) => {
                     state.view_id = Some(view_id);
-                    state.window.set_title("Neroa Servo Bridge Smoke - View Ready");
                     state.host.drain_commands();
                     state.window.request_redraw();
                 }
@@ -188,13 +185,14 @@ impl ApplicationHandler<WakerEvent> for App {
                         .paint(view_id)
                         .expect("failed to paint Servo bridge view");
                     state.rendering_context.present();
-                    state.window.set_title("Neroa Servo Bridge Smoke - Presented");
+                    let diagnostic = state
+                        .host
+                        .diagnostic_summary(view_id)
+                        .expect("failed to read Servo bridge diagnostics");
+                    state.window.set_title(&format!("Neroa Servo Bridge - {diagnostic}"));
                 }
             }
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-                // Match Servo 0.5.0's own Winit embedder: resize the WebView,
-                // not WindowRenderingContext. The direct Neroa Servo proof uses
-                // this same path successfully on Windows.
                 if let Some(view_id) = state.view_id {
                     let proxy = state.proxy.clone();
                     let viewport = Viewport::new(
@@ -217,9 +215,6 @@ impl ApplicationHandler<WakerEvent> for App {
 
     fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         if let Self::Running(state) = self {
-            // Safety net for platform event-loop implementations: even if a user
-            // wake is coalesced, bridge commands still get a deterministic drain
-            // before Winit sleeps.
             state.host.drain_commands();
             if state.view_id.is_some() {
                 state.window.request_redraw();
