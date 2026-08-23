@@ -9,6 +9,8 @@ pub mod network;
 pub mod protocol;
 pub mod receipt;
 pub mod router;
+#[cfg(feature = "servo-runtime")]
+pub mod servo_runtime;
 pub mod state_broker;
 pub mod supervisor;
 pub mod types;
@@ -30,6 +32,8 @@ pub use network::{
 };
 pub use receipt::{JsonlReceiptSink, MemoryReceiptSink, Receipt, ReceiptSink};
 pub use router::{AdaptiveRouter, RouteDecision, RouteRule, RouterConfig};
+#[cfg(feature = "servo-runtime")]
+pub use servo_runtime::ServoEngineProxy;
 pub use state_broker::{BrokeredState, StateBrokerError, StateContinuityBroker};
 pub use supervisor::{
     BrowserLifecycleSupervisor, RuntimeRecord, SupervisorConfig, SupervisorDecision,
