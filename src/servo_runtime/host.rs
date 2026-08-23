@@ -256,9 +256,9 @@ impl ServoHost {
                     ..
                 } => {
                     let button = match button {
-                        MouseButton::Left => ServoMouseButton::Primary,
-                        MouseButton::Right => ServoMouseButton::Secondary,
-                        MouseButton::Middle => ServoMouseButton::Auxiliary,
+                        MouseButton::Left => ServoMouseButton::Left,
+                        MouseButton::Right => ServoMouseButton::Right,
+                        MouseButton::Middle => ServoMouseButton::Middle,
                         MouseButton::Back => ServoMouseButton::Back,
                         MouseButton::Forward => ServoMouseButton::Forward,
                     };
