@@ -19,6 +19,7 @@ use crate::types::{
 
 use super::command::ServoCommand;
 use super::frame::{NoSharedGpuFrameSource, ServoFrameSource};
+use super::input::{committed_text_input, keyboard_input};
 use super::proxy::ServoEngineProxy;
 use super::wake::{ServoHostNotifier, SharedServoHostNotifier};
 
@@ -387,10 +388,22 @@ impl ServoHost {
                         view.webview.blur();
                     }
                 }
-                BrowserInput::Key { .. } | BrowserInput::Text { .. } => {
-                    return Err(EngineError::Unsupported(
-                        "Servo keyboard/text mapping is not wired yet".into(),
+                BrowserInput::Key {
+                    physical_code,
+                    logical_key,
+                    state,
+                    modifiers,
+                } => {
+                    view.webview.notify_input_event(keyboard_input(
+                        &physical_code,
+                        &logical_key,
+                        state,
+                        modifiers,
                     ));
+                }
+                BrowserInput::Text { text } => {
+                    view.webview
+                        .notify_input_event(committed_text_input(text));
                 }
             }
             Ok(())
