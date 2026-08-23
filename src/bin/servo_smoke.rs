@@ -90,7 +90,9 @@ impl ApplicationHandler<WakerEvent> for App {
             .build();
         servo.setup_logging();
 
-        let host_event_proxy = event_loop.create_proxy();
+        // EventLoopProxy must be created from the original EventLoop. The Waker
+        // already owns one, so clone it here rather than asking ActiveEventLoop.
+        let host_event_proxy = waker.0.clone();
         let notifier: Arc<dyn ServoHostNotifier> = Arc::new(move || {
             let _ = host_event_proxy.send_event(WakerEvent::Drive);
         });
@@ -105,12 +107,16 @@ impl ApplicationHandler<WakerEvent> for App {
         let config = ViewConfig {
             node_id: Uuid::new_v4(),
             initial_url: url,
-            viewport: Viewport::new(initial_size.width, initial_size.height, window.scale_factor() as f32),
+            viewport: Viewport::new(
+                initial_size.width,
+                initial_size.height,
+                window.scale_factor() as f32,
+            ),
             storage_partition: StoragePartitionId::ephemeral(),
         };
 
         let request_proxy = proxy.clone();
-        let completion_proxy = event_loop.create_proxy();
+        let completion_proxy = waker.0.clone();
         std::thread::spawn(move || {
             let runtime = tokio::runtime::Runtime::new().expect("failed to create smoke runtime");
             let result = runtime
