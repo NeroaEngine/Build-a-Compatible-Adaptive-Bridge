@@ -158,6 +158,13 @@ impl ServoHost {
                         frame_ready_count,
                     },
                 );
+
+                // Preserve the startup ordering from Neroa's already-proven
+                // direct Servo smoke: after building and sizing the WebView,
+                // immediately give Servo one event-loop turn before the caller
+                // proceeds with follow-up lifecycle commands.
+                self.servo.spin_event_loop();
+
                 let _ = reply.send(Ok(view_id));
                 self.notifier.notify();
             }
