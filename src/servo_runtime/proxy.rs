@@ -9,31 +9,40 @@ use crate::types::{
 };
 
 use super::command::ServoCommand;
+use super::wake::{NoopServoHostNotifier, SharedServoHostNotifier};
 
 /// Renderer-independent, Send + Sync handle to a Servo host.
 ///
 /// Servo itself is intentionally not stored here. The proxy only owns a
-/// cross-thread command sender; WebView/RenderingContext/Rc state remains on
-/// the Servo event-loop owner.
+/// cross-thread command sender and a thread-safe host notifier; WebView,
+/// RenderingContext, and Rc state remain on the Servo event-loop owner.
 #[derive(Clone)]
 pub struct ServoEngineProxy {
     tx: mpsc::UnboundedSender<ServoCommand>,
+    notifier: SharedServoHostNotifier,
 }
 
 impl ServoEngineProxy {
-    pub(crate) fn new(tx: mpsc::UnboundedSender<ServoCommand>) -> Self {
-        Self { tx }
+    pub(crate) fn new(
+        tx: mpsc::UnboundedSender<ServoCommand>,
+        notifier: SharedServoHostNotifier,
+    ) -> Self {
+        Self { tx, notifier }
     }
 
-    pub(crate) fn channel() -> (Self, mpsc::UnboundedReceiver<ServoCommand>) {
+    pub(crate) fn channel(
+        notifier: SharedServoHostNotifier,
+    ) -> (Self, mpsc::UnboundedReceiver<ServoCommand>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Self::new(tx), rx)
+        (Self::new(tx, notifier), rx)
     }
 
     fn send(&self, command: ServoCommand) -> Result<(), EngineError> {
         self.tx.send(command).map_err(|_| {
             EngineError::Internal("Servo host command channel is closed".to_string())
-        })
+        })?;
+        self.notifier.notify();
+        Ok(())
     }
 
     async fn await_reply<T>(rx: oneshot::Receiver<Result<T, EngineError>>) -> Result<T, EngineError> {
@@ -142,6 +151,8 @@ impl LiveWebEngine for ServoEngineProxy {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     fn assert_send_sync<T: Send + Sync>() {}
@@ -149,5 +160,11 @@ mod tests {
     #[test]
     fn servo_proxy_is_send_and_sync() {
         assert_send_sync::<ServoEngineProxy>();
+    }
+
+    #[test]
+    fn proxy_channel_can_be_constructed_without_servo_objects() {
+        let notifier: SharedServoHostNotifier = Arc::new(NoopServoHostNotifier);
+        let (_proxy, _rx) = ServoEngineProxy::channel(notifier);
     }
 }
