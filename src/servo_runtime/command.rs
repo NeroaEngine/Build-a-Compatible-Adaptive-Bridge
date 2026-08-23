@@ -14,7 +14,6 @@ pub(crate) type Reply<T> = oneshot::Sender<Result<T, EngineError>>;
 /// No Servo WebView, RenderingContext, Rc, or platform window handle crosses
 /// this boundary.
 pub(crate) enum ServoCommand {
-    Wake,
     CreateView {
         config: ViewConfig,
         reply: Reply<ViewId>,
@@ -56,30 +55,4 @@ pub(crate) enum ServoCommand {
         view_id: ViewId,
         reply: Reply<Option<SharedGpuSurface>>,
     },
-}
-
-impl ServoCommand {
-    pub(crate) fn fail(self, message: impl Into<String>) {
-        let message = message.into();
-        match self {
-            Self::Wake => {},
-            Self::CreateView { reply, .. } => {
-                let _ = reply.send(Err(EngineError::Internal(message)));
-            },
-            Self::DestroyView { reply, .. }
-            | Self::Navigate { reply, .. }
-            | Self::Resize { reply, .. }
-            | Self::Input { reply, .. }
-            | Self::SetActivity { reply, .. }
-            | Self::ImportState { reply, .. } => {
-                let _ = reply.send(Err(EngineError::Internal(message)));
-            },
-            Self::ExportState { reply, .. } => {
-                let _ = reply.send(Err(EngineError::Internal(message)));
-            },
-            Self::AcquireFrame { reply, .. } => {
-                let _ = reply.send(Err(EngineError::Internal(message)));
-            },
-        }
-    }
 }
