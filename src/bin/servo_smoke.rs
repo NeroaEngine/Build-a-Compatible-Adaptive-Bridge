@@ -98,8 +98,10 @@ impl ApplicationHandler<WakerEvent> for App {
 
         let (proxy, host) = ServoHost::attach(servo, rendering_context.clone(), notifier);
 
+        // Use the exact local page that already rendered successfully in the
+        // direct Servo proof so this test isolates only the bridge indirection.
         let url = Url::parse(
-            "data:text/html,%3Chtml%3E%3Cbody%20style%3D%22margin%3A0%3Bbackground%3A%230b1020%3Bcolor%3Awhite%3Bfont-family%3Asans-serif%3Bdisplay%3Agrid%3Bplace-items%3Acenter%3Bheight%3A100vh%22%3E%3Cdiv%20style%3D%22text-align%3Acenter%22%3E%3Ch1%3ENeroa%20Servo%20Bridge%20Live%3C%2Fh1%3E%3Cp%3ELiveWebEngine%20%E2%86%92%20ServoEngineProxy%20%E2%86%92%20ServoHost%20%E2%86%92%20real%20Servo%200.5.0%20WebView.%3C%2Fp%3E%3C%2Fdiv%3E%3C%2Fbody%3E%3C%2Fhtml%3E",
+            "data:text/html,%3Chtml%3E%3Cbody%20style%3D%22margin%3A0%3Bbackground%3A%230b1020%3Bcolor%3Awhite%3Bfont-family%3Asans-serif%3Bdisplay%3Agrid%3Bplace-items%3Acenter%3Bheight%3A100vh%22%3E%3Cdiv%20style%3D%22text-align%3Acenter%22%3E%3Ch1%3ENeroa%20Servo%20Live%3C%2Fh1%3E%3Cp%3EReal%20Servo%200.5.0%20WebView%20frame%20reached%20the%20native%20window.%3C%2Fp%3E%3C%2Fdiv%3E%3C%2Fbody%3E%3C%2Fhtml%3E",
         )
         .expect("static data URL must parse");
 
@@ -175,11 +177,12 @@ impl ApplicationHandler<WakerEvent> for App {
             return;
         };
 
-        state.host.drain_commands();
-
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
+                // Give Servo one normal event-loop turn before painting, matching
+                // the successful direct proof without spinning on every Winit event.
+                state.host.drain_commands();
                 if let Some(view_id) = state.view_id {
                     state
                         .host
