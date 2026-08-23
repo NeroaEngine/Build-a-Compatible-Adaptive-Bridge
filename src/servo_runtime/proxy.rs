@@ -20,21 +20,31 @@ use super::wake::SharedServoHostNotifier;
 pub struct ServoEngineProxy {
     tx: mpsc::UnboundedSender<ServoCommand>,
     notifier: SharedServoHostNotifier,
+    external_gpu_surface: bool,
 }
 
 impl ServoEngineProxy {
     pub(crate) fn new(
         tx: mpsc::UnboundedSender<ServoCommand>,
         notifier: SharedServoHostNotifier,
+        external_gpu_surface: bool,
     ) -> Self {
-        Self { tx, notifier }
+        Self {
+            tx,
+            notifier,
+            external_gpu_surface,
+        }
     }
 
     pub(crate) fn channel(
         notifier: SharedServoHostNotifier,
+        external_gpu_surface: bool,
     ) -> (Self, mpsc::UnboundedReceiver<ServoCommand>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Self::new(tx, notifier), rx)
+        (
+            Self::new(tx, notifier, external_gpu_surface),
+            rx,
+        )
     }
 
     fn send(&self, command: ServoCommand) -> Result<(), EngineError> {
@@ -59,7 +69,9 @@ impl LiveWebEngine for ServoEngineProxy {
     }
 
     fn capabilities(&self) -> EngineCapabilities {
-        EngineCapabilities::servo_conservative()
+        let mut capabilities = EngineCapabilities::servo_conservative();
+        capabilities.external_gpu_surface = self.external_gpu_surface;
+        capabilities
     }
 
     async fn create_view(&self, config: ViewConfig) -> Result<ViewId, EngineError> {
@@ -165,6 +177,14 @@ mod tests {
     #[test]
     fn proxy_channel_can_be_constructed_without_servo_objects() {
         let notifier: SharedServoHostNotifier = Arc::new(NoopServoHostNotifier);
-        let (_proxy, _rx) = ServoEngineProxy::channel(notifier);
+        let (proxy, _rx) = ServoEngineProxy::channel(notifier, false);
+        assert!(!proxy.capabilities().external_gpu_surface);
+    }
+
+    #[test]
+    fn proxy_reports_injected_external_gpu_capability() {
+        let notifier: SharedServoHostNotifier = Arc::new(NoopServoHostNotifier);
+        let (proxy, _rx) = ServoEngineProxy::channel(notifier, true);
+        assert!(proxy.capabilities().external_gpu_surface);
     }
 }
