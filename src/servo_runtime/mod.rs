@@ -6,5 +6,3 @@ mod wake;
 pub use host::ServoHost;
 pub use proxy::ServoEngineProxy;
 pub use wake::{NoopServoHostNotifier, ServoHostNotifier};
-
-pub(crate) use command::ServoCommand;
