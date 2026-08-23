@@ -7,6 +7,7 @@ description = "Renderer-independent adaptive web compatibility bridge for the Ne
 
 [features]
 default = []
+chromium-runtime = []
 servo-runtime = [
     "dep:embedder_traits",
     "dep:euclid",
