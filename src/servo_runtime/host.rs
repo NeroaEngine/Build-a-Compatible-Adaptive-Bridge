@@ -18,6 +18,7 @@ use crate::types::{
 };
 
 use super::command::ServoCommand;
+use super::frame::{NoSharedGpuFrameSource, ServoFrameSource};
 use super::proxy::ServoEngineProxy;
 use super::wake::{ServoHostNotifier, SharedServoHostNotifier};
 
@@ -45,41 +46,70 @@ impl WebViewDelegate for HostWebViewDelegate {
     }
 }
 
-/// Event-loop-owned Servo backend.
+/// Servo backend owned by the dedicated Servo host thread.
 ///
 /// This type is intentionally NOT Send/Sync. It owns Servo/WebView/Rc state and
-/// must only be driven from the platform event-loop thread. The thread-safe
-/// `ServoEngineProxy` communicates with it through `ServoCommand`.
+/// must only be driven from its owner thread. The thread-safe `ServoEngineProxy`
+/// communicates with it through `ServoCommand`.
 pub struct ServoHost {
     servo: Servo,
     rendering_context: Rc<dyn RenderingContext>,
+    frame_source: Rc<dyn ServoFrameSource>,
     rx: mpsc::UnboundedReceiver<ServoCommand>,
     notifier: SharedServoHostNotifier,
     views: HashMap<ViewId, HostView>,
 }
 
 impl ServoHost {
-    /// Attach the renderer-independent proxy to an event-loop-owned Servo host
-    /// without exposing the private command receiver to platform code.
+    /// Attach the renderer-independent proxy with the fail-closed default frame
+    /// source. Until a Neroa GPU exporter is installed, `acquire_frame()` returns
+    /// `None` and never performs CPU pixel readback.
     pub fn attach(
         servo: Servo,
         rendering_context: Rc<dyn RenderingContext>,
         notifier: std::sync::Arc<dyn ServoHostNotifier>,
     ) -> (ServoEngineProxy, Self) {
-        let (proxy, rx) = ServoEngineProxy::channel(notifier.clone());
-        let host = Self::new(servo, rendering_context, rx, notifier);
+        Self::attach_with_frame_source(
+            servo,
+            rendering_context,
+            notifier,
+            Rc::new(NoSharedGpuFrameSource),
+        )
+    }
+
+    /// Attach a concrete GPU frame exporter owned by the Servo host thread.
+    ///
+    /// The frame source may expose only compositor-shareable GPU resources. It
+    /// must not implement this seam using CPU RGBA readback.
+    pub fn attach_with_frame_source(
+        servo: Servo,
+        rendering_context: Rc<dyn RenderingContext>,
+        notifier: std::sync::Arc<dyn ServoHostNotifier>,
+        frame_source: Rc<dyn ServoFrameSource>,
+    ) -> (ServoEngineProxy, Self) {
+        let external_gpu_surface = frame_source.supports_external_gpu_surface();
+        let (proxy, rx) = ServoEngineProxy::channel(notifier.clone(), external_gpu_surface);
+        let host = Self::new(
+            servo,
+            rendering_context,
+            frame_source,
+            rx,
+            notifier,
+        );
         (proxy, host)
     }
 
     pub(crate) fn new(
         servo: Servo,
         rendering_context: Rc<dyn RenderingContext>,
+        frame_source: Rc<dyn ServoFrameSource>,
         rx: mpsc::UnboundedReceiver<ServoCommand>,
         notifier: SharedServoHostNotifier,
     ) -> Self {
         Self {
             servo,
             rendering_context,
+            frame_source,
             rx,
             notifier,
             views: HashMap::new(),
@@ -127,7 +157,7 @@ impl ServoHost {
     }
 
     /// Paint a particular Servo WebView into the host rendering context.
-    /// Presentation/blitting remains the responsibility of the platform host.
+    /// Presentation/blitting remains the responsibility of the host integration.
     pub fn paint(&self, view_id: ViewId) -> Result<(), EngineError> {
         let view = self
             .views
@@ -263,15 +293,21 @@ impl ServoHost {
                 self.notifier.notify();
             }
             ServoCommand::AcquireFrame { view_id, reply } => {
-                let result = if self.views.contains_key(&view_id) {
-                    // Deliberately do not call RenderingContext::read_to_image here.
-                    // Stock Servo does not expose a stable compositor-shareable texture
-                    // handle through this API, so the truthful result is no external GPU
-                    // lease until NeroaRenderingContext is implemented.
-                    Ok(None)
-                } else {
-                    Err(EngineError::ViewNotFound(view_id))
-                };
+                let result = self.views.get(&view_id).map_or_else(
+                    || Err(EngineError::ViewNotFound(view_id)),
+                    |view| {
+                        let generation = view.frame_ready_count.get();
+                        if generation == 0 {
+                            return Ok(None);
+                        }
+
+                        self.frame_source.acquire_surface(
+                            view_id,
+                            &view.config.viewport,
+                            generation,
+                        )
+                    },
+                );
                 let _ = reply.send(result);
             }
         }
