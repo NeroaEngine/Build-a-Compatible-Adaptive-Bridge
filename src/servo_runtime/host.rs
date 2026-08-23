@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -25,14 +26,18 @@ struct HostView {
     config: ViewConfig,
     portable: PortableWebState,
     activity: ActivityState,
+    frame_ready_count: Rc<Cell<u64>>,
 }
 
 struct HostWebViewDelegate {
     notifier: SharedServoHostNotifier,
+    frame_ready_count: Rc<Cell<u64>>,
 }
 
 impl WebViewDelegate for HostWebViewDelegate {
     fn notify_new_frame_ready(&self, _webview: WebView) {
+        self.frame_ready_count
+            .set(self.frame_ready_count.get().saturating_add(1));
         self.notifier.notify();
     }
 }
@@ -91,6 +96,27 @@ impl ServoHost {
         self.views.len()
     }
 
+    /// Human-readable, non-pixel diagnostic state for the transitional smoke
+    /// host. This intentionally does not read the rendering surface back to CPU.
+    pub fn diagnostic_summary(&self, view_id: ViewId) -> Result<String, EngineError> {
+        let view = self
+            .views
+            .get(&view_id)
+            .ok_or(EngineError::ViewNotFound(view_id))?;
+        let url = view
+            .webview
+            .url()
+            .map(|url| url.to_string())
+            .unwrap_or_else(|| "none".into());
+        Ok(format!(
+            "load={:?} frames={} activity={:?} url={}",
+            view.webview.load_status(),
+            view.frame_ready_count.get(),
+            view.activity,
+            url
+        ))
+    }
+
     /// Paint a particular Servo WebView into the host rendering context.
     /// Presentation/blitting remains the responsibility of the platform host.
     pub fn paint(&self, view_id: ViewId) -> Result<(), EngineError> {
@@ -107,8 +133,10 @@ impl ServoHost {
             ServoCommand::CreateView { config, reply } => {
                 let view_id = Uuid::new_v4();
                 let portable = PortableWebState::new(config.initial_url.clone());
+                let frame_ready_count = Rc::new(Cell::new(0));
                 let delegate = Rc::new(HostWebViewDelegate {
                     notifier: self.notifier.clone(),
+                    frame_ready_count: frame_ready_count.clone(),
                 });
                 let webview = WebViewBuilder::new(&self.servo, self.rendering_context.clone())
                     .url(config.initial_url.clone())
@@ -127,6 +155,7 @@ impl ServoHost {
                         config,
                         portable,
                         activity: ActivityState::Dormant,
+                        frame_ready_count,
                     },
                 );
                 let _ = reply.send(Ok(view_id));
