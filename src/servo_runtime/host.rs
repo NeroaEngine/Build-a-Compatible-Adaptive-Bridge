@@ -103,17 +103,11 @@ impl ServoHost {
             .views
             .get(&view_id)
             .ok_or(EngineError::ViewNotFound(view_id))?;
-        let url = view
-            .webview
-            .url()
-            .map(|url| url.to_string())
-            .unwrap_or_else(|| "none".into());
         Ok(format!(
-            "load={:?} frames={} activity={:?} url={}",
+            "load={:?} frames={} activity={:?}",
             view.webview.load_status(),
             view.frame_ready_count.get(),
             view.activity,
-            url
         ))
     }
 
@@ -158,13 +152,6 @@ impl ServoHost {
                         frame_ready_count,
                     },
                 );
-
-                // Preserve the startup ordering from Neroa's already-proven
-                // direct Servo smoke: after building and sizing the WebView,
-                // immediately give Servo one event-loop turn before the caller
-                // proceeds with follow-up lifecycle commands.
-                self.servo.spin_event_loop();
-
                 let _ = reply.send(Ok(view_id));
                 self.notifier.notify();
             }
@@ -224,16 +211,10 @@ impl ServoHost {
                 reply,
             } => {
                 let result = self.with_view_mut(view_id, |view| {
+                    // Activity is Neroa scheduling policy. Do not equate it with
+                    // Servo visibility until a distinct visibility contract exists.
+                    // The generic LiveWebEngine scaffold only records this state.
                     view.activity = activity;
-                    match activity {
-                        ActivityState::Dormant | ActivityState::Frozen => {
-                            view.webview.hide();
-                            view.webview.blur();
-                        }
-                        ActivityState::Throttled { .. } | ActivityState::Active => {
-                            view.webview.show();
-                        }
-                    }
                     Ok(())
                 });
                 let _ = reply.send(result);
