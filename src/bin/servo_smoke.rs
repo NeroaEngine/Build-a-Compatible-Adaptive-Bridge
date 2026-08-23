@@ -2,21 +2,20 @@
 
 use std::error::Error;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 use embedder_traits::EventLoopWaker;
 use neroa_compatible_adaptive_bridge::{
-    ActivityState, LiveWebEngine, ServoHost, ServoHostNotifier, StoragePartitionId, ViewConfig,
-    ViewId, Viewport,
+    ActivityState, LiveWebEngine, ServoEngineProxy, ServoHost, ServoHostNotifier,
+    StoragePartitionId, ViewConfig, ViewId, Viewport,
 };
-use servo::{RenderingContext, ServoBuilder, WindowRenderingContext};
-use tracing::warn;
+use servo::{RenderingContext, ServoBuilder, SoftwareRenderingContext};
 use url::Url;
 use uuid::Uuid;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{EventLoop, EventLoopProxy};
-use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -27,149 +26,113 @@ fn main() -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::with_user_event()
         .build()
         .expect("failed to create winit event loop");
+    let event_proxy = event_loop.create_proxy();
 
-    let mut app = App::new(&event_loop);
+    let mut app = App::new(event_proxy);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
 
 struct AppState {
     window: Window,
-    rendering_context: Rc<WindowRenderingContext>,
-    proxy: neroa_compatible_adaptive_bridge::ServoEngineProxy,
-    host: ServoHost,
-    view_id: Option<ViewId>,
+    proxy: Option<ServoEngineProxy>,
+    view_id: Arc<Mutex<Option<ViewId>>>,
 }
 
 enum App {
-    Initial(Waker),
+    Initial {
+        event_proxy: EventLoopProxy<AppEvent>,
+        view_id: Arc<Mutex<Option<ViewId>>>,
+    },
     Running(AppState),
 }
 
 impl App {
-    fn new(event_loop: &EventLoop<WakerEvent>) -> Self {
-        Self::Initial(Waker::new(event_loop.create_proxy()))
+    fn new(event_proxy: EventLoopProxy<AppEvent>) -> Self {
+        Self::Initial {
+            event_proxy,
+            view_id: Arc::new(Mutex::new(None)),
+        }
     }
 }
 
-impl ApplicationHandler<WakerEvent> for App {
+impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let Self::Initial(waker) = self else {
+        let Self::Initial {
+            event_proxy,
+            view_id,
+        } = self
+        else {
             return;
         };
-
-        let display_handle = event_loop
-            .display_handle()
-            .expect("failed to get display handle");
 
         let window = event_loop
             .create_window(
                 Window::default_attributes()
-                    .with_title("Neroa Servo Bridge Smoke")
+                    .with_title("Neroa Shell - Servo Worker Starting")
                     .with_inner_size(winit::dpi::PhysicalSize::new(1000, 700)),
             )
-            .expect("failed to create winit window");
+            .expect("failed to create Neroa shell window");
 
-        let window_handle = window.window_handle().expect("failed to get window handle");
-        let current_size = window.inner_size();
-        let initial_size = winit::dpi::PhysicalSize::new(
-            current_size.width.max(1),
-            current_size.height.max(1),
-        );
-
-        let rendering_context = Rc::new(
-            WindowRenderingContext::new(display_handle, window_handle, initial_size)
-                .expect("failed to create Servo rendering context"),
-        );
-
-        rendering_context
-            .make_current()
-            .expect("failed to make Servo rendering context current");
-
-        let servo = ServoBuilder::default()
-            .event_loop_waker(Box::new(waker.clone()))
-            .build();
-        servo.setup_logging();
-
-        let host_event_proxy = waker.0.clone();
-        let notifier: Arc<dyn ServoHostNotifier> = Arc::new(move || {
-            let _ = host_event_proxy.send_event(WakerEvent::Drive);
-        });
-
-        let (proxy, host) = ServoHost::attach(servo, rendering_context.clone(), notifier);
-
-        let url = Url::parse(
-            "data:text/html,%3Chtml%3E%3Cbody%20style%3D%22margin%3A0%3Bbackground%3A%230b1020%3Bcolor%3Awhite%3Bfont-family%3Asans-serif%3Bdisplay%3Agrid%3Bplace-items%3Acenter%3Bheight%3A100vh%22%3E%3Cdiv%20style%3D%22text-align%3Acenter%22%3E%3Ch1%3ENeroa%20Servo%20Live%3C%2Fh1%3E%3Cp%3EReal%20Servo%200.5.0%20WebView%20frame%20reached%20the%20native%20window.%3C%2Fp%3E%3C%2Fdiv%3E%3C%2Fbody%3E%3C%2Fhtml%3E",
-        )
-        .expect("static data URL must parse");
-
-        let config = ViewConfig {
-            node_id: Uuid::new_v4(),
-            initial_url: url,
-            viewport: Viewport::new(
-                initial_size.width,
-                initial_size.height,
-                window.scale_factor() as f32,
-            ),
-            storage_partition: StoragePartitionId::ephemeral(),
-        };
-
-        let request_proxy = proxy.clone();
-        let completion_proxy = waker.0.clone();
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Runtime::new().expect("failed to create smoke runtime");
-            let result = runtime.block_on(async {
-                let view_id = request_proxy.create_view(config).await?;
-                request_proxy
-                    .set_activity(view_id, ActivityState::Active)
-                    .await?;
-                Ok::<ViewId, neroa_compatible_adaptive_bridge::EngineError>(view_id)
-            });
-            let result = result.map_err(|error| error.to_string());
-            let _ = completion_proxy.send_event(WakerEvent::ViewCreated(result));
-        });
+        spawn_servo_worker(event_proxy.clone(), view_id.clone());
 
         *self = Self::Running(AppState {
             window,
-            rendering_context,
-            proxy,
-            host,
-            view_id: None,
+            proxy: None,
+            view_id: view_id.clone(),
         });
     }
 
     fn user_event(
         &mut self,
         _event_loop: &winit::event_loop::ActiveEventLoop,
-        event: WakerEvent,
+        event: AppEvent,
     ) {
         let Self::Running(state) = self else {
             return;
         };
 
         match event {
-            WakerEvent::Drive => {
-                state.host.drain_commands();
-                if let Some(view_id) = state.view_id {
-                    if state
-                        .host
-                        .take_frame_ready(view_id)
-                        .expect("failed to read Servo frame-ready state")
-                    {
-                        state.window.request_redraw();
+            AppEvent::WorkerReady(proxy) => {
+                state.proxy = Some(proxy.clone());
+                state.window.set_title("Neroa Shell - Servo Worker Ready");
+
+                let view_id = state.view_id.clone();
+                let size = state.window.inner_size();
+                let scale_factor = state.window.scale_factor() as f32;
+                std::thread::spawn(move || {
+                    let runtime =
+                        tokio::runtime::Runtime::new().expect("failed to create smoke runtime");
+                    let url = Url::parse(
+                        "data:text/html,%3Chtml%3E%3Cbody%20style%3D%22margin%3A0%3Bbackground%3A%230b1020%3Bcolor%3Awhite%3Bfont-family%3Asans-serif%3Bdisplay%3Agrid%3Bplace-items%3Acenter%3Bheight%3A100vh%22%3E%3Cdiv%20style%3D%22text-align%3Acenter%22%3E%3Ch1%3ENeroa%20Servo%20Worker%20Live%3C%2Fh1%3E%3Cp%3EServo%20is%20running%20off%20the%20visible%20Neroa%20window%20thread.%3C%2Fp%3E%3C%2Fdiv%3E%3C%2Fbody%3E%3C%2Fhtml%3E",
+                    )
+                    .expect("static data URL must parse");
+                    let config = ViewConfig {
+                        node_id: Uuid::new_v4(),
+                        initial_url: url,
+                        viewport: Viewport::new(size.width.max(1), size.height.max(1), scale_factor),
+                        storage_partition: StoragePartitionId::ephemeral(),
+                    };
+
+                    let result = runtime.block_on(async {
+                        let id = proxy.create_view(config).await?;
+                        *view_id.lock().expect("view id lock poisoned") = Some(id);
+                        proxy.set_activity(id, ActivityState::Active).await?;
+                        Ok::<ViewId, neroa_compatible_adaptive_bridge::EngineError>(id)
+                    });
+
+                    if let Err(error) = result {
+                        eprintln!("Servo worker create_view failed: {error}");
                     }
-                }
+                });
             }
-            WakerEvent::ViewCreated(result) => match result {
-                Ok(view_id) => {
-                    state.view_id = Some(view_id);
-                    state.host.drain_commands();
-                    // Initial damage paint is allowed even before Servo emits a
-                    // frame-ready callback, matching Servo's documented model.
-                    state.window.request_redraw();
-                }
-                Err(error) => panic!("Servo bridge create_view failed: {error}"),
-            },
+            AppEvent::WorkerStatus(status) => {
+                state.window.set_title(&format!("Neroa Shell - {status}"));
+            }
+            AppEvent::WorkerFailed(error) => {
+                state.window.set_title("Neroa Shell - Servo Worker Failed");
+                eprintln!("Servo worker failed: {error}");
+            }
         }
     }
 
@@ -179,69 +142,125 @@ impl ApplicationHandler<WakerEvent> for App {
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let Self::Running(state) = self else {
+        let Self::Running(_state) = self else {
             return;
         };
 
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::RedrawRequested => {
-                if let Some(view_id) = state.view_id {
-                    state
-                        .host
-                        .paint(view_id)
-                        .expect("failed to paint Servo bridge view");
-                    state.rendering_context.present();
-                    let diagnostic = state
-                        .host
-                        .diagnostic_summary(view_id)
-                        .expect("failed to read Servo bridge diagnostics");
-                    state.window.set_title(&format!("Neroa Servo Bridge - {diagnostic}"));
-                }
-            }
-            WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-                if let Some(view_id) = state.view_id {
-                    let proxy = state.proxy.clone();
-                    let viewport = Viewport::new(
-                        size.width,
-                        size.height,
-                        state.window.scale_factor() as f32,
-                    );
-                    std::thread::spawn(move || {
-                        let runtime = tokio::runtime::Runtime::new()
-                            .expect("failed to create resize runtime");
-                        let _ = runtime.block_on(proxy.resize(view_id, viewport));
-                    });
-                }
-            }
-            _ => {}
+        if let WindowEvent::CloseRequested = event {
+            event_loop.exit();
         }
     }
 }
 
+fn spawn_servo_worker(
+    shell_events: EventLoopProxy<AppEvent>,
+    shared_view_id: Arc<Mutex<Option<ViewId>>>,
+) {
+    std::thread::Builder::new()
+        .name("neroa-servo-host".into())
+        .spawn(move || {
+            let (wake_tx, wake_rx) = mpsc::channel::<()>();
+            let servo_waker = ThreadWaker(wake_tx.clone());
+
+            let rendering_context = match SoftwareRenderingContext::new(
+                winit::dpi::PhysicalSize::new(1000, 700),
+            ) {
+                Ok(context) => Rc::new(context),
+                Err(error) => {
+                    let _ = shell_events.send_event(AppEvent::WorkerFailed(format!(
+                        "software rendering context: {error:?}"
+                    )));
+                    return;
+                }
+            };
+
+            if let Err(error) = rendering_context.make_current() {
+                let _ = shell_events.send_event(AppEvent::WorkerFailed(format!(
+                    "make current: {error:?}"
+                )));
+                return;
+            }
+
+            let servo = ServoBuilder::default()
+                .event_loop_waker(Box::new(servo_waker.clone()))
+                .build();
+            servo.setup_logging();
+
+            let notifier_tx = wake_tx.clone();
+            let notifier: Arc<dyn ServoHostNotifier> = Arc::new(move || {
+                let _ = notifier_tx.send(());
+            });
+            let (proxy, mut host) = ServoHost::attach(servo, rendering_context.clone(), notifier);
+
+            if shell_events
+                .send_event(AppEvent::WorkerReady(proxy))
+                .is_err()
+            {
+                return;
+            }
+
+            loop {
+                match wake_rx.recv_timeout(Duration::from_millis(250)) {
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {
+                        host.drain_commands();
+
+                        let current_view = *shared_view_id
+                            .lock()
+                            .expect("shared view id lock poisoned");
+                        let Some(view_id) = current_view else {
+                            continue;
+                        };
+
+                        let frame_ready = host.take_frame_ready(view_id).unwrap_or(false);
+                        if frame_ready {
+                            if let Err(error) = host.paint(view_id) {
+                                let _ = shell_events.send_event(AppEvent::WorkerFailed(format!(
+                                    "paint: {error}"
+                                )));
+                                return;
+                            }
+                            rendering_context.present();
+                        }
+
+                        match host.diagnostic_summary(view_id) {
+                            Ok(summary) => {
+                                if shell_events
+                                    .send_event(AppEvent::WorkerStatus(summary))
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                            }
+                            Err(error) => {
+                                let _ = shell_events.send_event(AppEvent::WorkerFailed(format!(
+                                    "diagnostics: {error}"
+                                )));
+                                return;
+                            }
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                }
+            }
+        })
+        .expect("failed to spawn Servo host thread");
+}
+
 #[derive(Clone)]
-struct Waker(EventLoopProxy<WakerEvent>);
+struct ThreadWaker(mpsc::Sender<()>);
 
-#[derive(Debug)]
-enum WakerEvent {
-    Drive,
-    ViewCreated(Result<ViewId, String>),
-}
-
-impl Waker {
-    fn new(proxy: EventLoopProxy<WakerEvent>) -> Self {
-        Self(proxy)
-    }
-}
-
-impl EventLoopWaker for Waker {
+impl EventLoopWaker for ThreadWaker {
     fn clone_box(&self) -> Box<dyn EventLoopWaker> {
         Box::new(self.clone())
     }
 
     fn wake(&self) {
-        if let Err(error) = self.0.send_event(WakerEvent::Drive) {
-            warn!(?error, "failed to wake Servo event loop");
-        }
+        let _ = self.0.send(());
     }
+}
+
+enum AppEvent {
+    WorkerReady(ServoEngineProxy),
+    WorkerStatus(String),
+    WorkerFailed(String),
 }
