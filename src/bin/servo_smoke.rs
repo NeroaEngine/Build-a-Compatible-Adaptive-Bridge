@@ -175,10 +175,11 @@ impl ApplicationHandler<WakerEvent> for App {
             return;
         };
 
+        state.host.drain_commands();
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
-                state.host.drain_commands();
                 if let Some(view_id) = state.view_id {
                     state
                         .host
@@ -207,18 +208,7 @@ impl ApplicationHandler<WakerEvent> for App {
                     });
                 }
             }
-            _ => {
-                state.host.drain_commands();
-            }
-        }
-    }
-
-    fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
-        if let Self::Running(state) = self {
-            state.host.drain_commands();
-            if state.view_id.is_some() {
-                state.window.request_redraw();
-            }
+            _ => {}
         }
     }
 }
