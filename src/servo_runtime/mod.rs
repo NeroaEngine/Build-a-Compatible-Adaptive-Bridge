@@ -1,6 +1,7 @@
 mod command;
 mod frame;
 mod host;
+mod input;
 mod proxy;
 mod wake;
 
