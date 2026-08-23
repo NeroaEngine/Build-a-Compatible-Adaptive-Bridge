@@ -8,6 +8,7 @@ use servo::{
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use webrender_api::units::DevicePoint;
 
 use crate::engine::EngineError;
 use crate::types::{
@@ -16,7 +17,8 @@ use crate::types::{
 };
 
 use super::command::ServoCommand;
-use super::wake::SharedServoHostNotifier;
+use super::proxy::ServoEngineProxy;
+use super::wake::{ServoHostNotifier, SharedServoHostNotifier};
 
 struct HostView {
     webview: WebView,
@@ -39,6 +41,18 @@ pub struct ServoHost {
 }
 
 impl ServoHost {
+    /// Attach the renderer-independent proxy to an event-loop-owned Servo host
+    /// without exposing the private command receiver to platform code.
+    pub fn attach(
+        servo: Servo,
+        rendering_context: Rc<dyn RenderingContext>,
+        notifier: std::sync::Arc<dyn ServoHostNotifier>,
+    ) -> (ServoEngineProxy, Self) {
+        let (proxy, rx) = ServoEngineProxy::channel(notifier.clone());
+        let host = Self::new(servo, rendering_context, rx, notifier);
+        (proxy, host)
+    }
+
     pub(crate) fn new(
         servo: Servo,
         rendering_context: Rc<dyn RenderingContext>,
@@ -234,9 +248,9 @@ impl ServoHost {
         self.with_view_mut(view_id, |view| {
             match input {
                 BrowserInput::PointerMove { position, .. } => {
-                    view.webview.notify_input_event(InputEvent::MouseMove(
-                        MouseMoveEvent::new((position.x as f32, position.y as f32).into()),
-                    ));
+                    let point = DevicePoint::new(position.x as f32, position.y as f32);
+                    view.webview
+                        .notify_input_event(InputEvent::MouseMove(MouseMoveEvent::new(point.into())));
                 }
                 BrowserInput::PointerButton {
                     position,
@@ -255,12 +269,9 @@ impl ServoHost {
                         ButtonState::Pressed => MouseButtonAction::Down,
                         ButtonState::Released => MouseButtonAction::Up,
                     };
+                    let point = DevicePoint::new(position.x as f32, position.y as f32);
                     view.webview.notify_input_event(InputEvent::MouseButton(
-                        MouseButtonEvent::new(
-                            action,
-                            button,
-                            (position.x as f32, position.y as f32).into(),
-                        ),
+                        MouseButtonEvent::new(action, button, point.into()),
                     ));
                 }
                 BrowserInput::Scroll {
@@ -274,15 +285,17 @@ impl ServoHost {
                         ScrollMode::Pixel => WheelMode::DeltaPixel,
                         ScrollMode::Line => WheelMode::DeltaLine,
                     };
-                    view.webview.notify_input_event(InputEvent::Wheel(WheelEvent::new(
-                        WheelDelta {
-                            x: delta_x,
-                            y: delta_y,
-                            z: 0.0,
-                            mode,
-                        },
-                        (position.x as f32, position.y as f32).into(),
-                    )));
+                    let point = DevicePoint::new(position.x as f32, position.y as f32);
+                    view.webview
+                        .notify_input_event(InputEvent::Wheel(WheelEvent::new(
+                            WheelDelta {
+                                x: delta_x,
+                                y: delta_y,
+                                z: 0.0,
+                                mode,
+                            },
+                            point.into(),
+                        )));
                     view.portable.scroll_x += delta_x;
                     view.portable.scroll_y += delta_y;
                 }
