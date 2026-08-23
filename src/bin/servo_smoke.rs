@@ -188,10 +188,13 @@ impl ApplicationHandler<WakerEvent> for App {
                         .paint(view_id)
                         .expect("failed to paint Servo bridge view");
                     state.rendering_context.present();
+                    state.window.set_title("Neroa Servo Bridge Smoke - Presented");
                 }
             }
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-                state.rendering_context.resize(size);
+                // Match Servo 0.5.0's own Winit embedder: resize the WebView,
+                // not WindowRenderingContext. The direct Neroa Servo proof uses
+                // this same path successfully on Windows.
                 if let Some(view_id) = state.view_id {
                     let proxy = state.proxy.clone();
                     let viewport = Viewport::new(
