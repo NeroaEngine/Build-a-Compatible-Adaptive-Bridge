@@ -25,7 +25,7 @@ impl ServoEngineProxy {
         Self { tx }
     }
 
-    pub fn channel() -> (Self, mpsc::UnboundedReceiver<ServoCommand>) {
+    pub(crate) fn channel() -> (Self, mpsc::UnboundedReceiver<ServoCommand>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (Self::new(tx), rx)
     }
