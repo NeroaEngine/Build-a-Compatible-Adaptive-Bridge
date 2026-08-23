@@ -9,7 +9,7 @@ use crate::types::{
 };
 
 use super::command::ServoCommand;
-use super::wake::{NoopServoHostNotifier, SharedServoHostNotifier};
+use super::wake::SharedServoHostNotifier;
 
 /// Renderer-independent, Send + Sync handle to a Servo host.
 ///
@@ -59,7 +59,6 @@ impl LiveWebEngine for ServoEngineProxy {
     }
 
     fn capabilities(&self) -> EngineCapabilities {
-        // Keep this conservative until the host proves each capability.
         EngineCapabilities::servo_conservative()
     }
 
@@ -154,6 +153,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::servo_runtime::wake::NoopServoHostNotifier;
 
     fn assert_send_sync<T: Send + Sync>() {}
 
