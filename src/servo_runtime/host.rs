@@ -94,9 +94,6 @@ impl ServoHost {
 
     fn handle(&mut self, command: ServoCommand) {
         match command {
-            ServoCommand::Wake => {
-                self.servo.spin_event_loop();
-            }
             ServoCommand::CreateView { config, reply } => {
                 let view_id = Uuid::new_v4();
                 let portable = PortableWebState::new(config.initial_url.clone());
