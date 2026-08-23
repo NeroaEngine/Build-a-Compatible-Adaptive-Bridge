@@ -3,8 +3,8 @@ use std::rc::Rc;
 
 use servo::{
     InputEvent, MouseButton as ServoMouseButton, MouseButtonAction, MouseButtonEvent,
-    MouseMoveEvent, RenderingContext, Servo, WebView, WebViewBuilder, WheelDelta, WheelEvent,
-    WheelMode,
+    MouseMoveEvent, RenderingContext, Servo, WebView, WebViewBuilder, WebViewDelegate, WheelDelta,
+    WheelEvent, WheelMode,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -25,6 +25,16 @@ struct HostView {
     config: ViewConfig,
     portable: PortableWebState,
     activity: ActivityState,
+}
+
+struct HostWebViewDelegate {
+    notifier: SharedServoHostNotifier,
+}
+
+impl WebViewDelegate for HostWebViewDelegate {
+    fn notify_new_frame_ready(&self, _webview: WebView) {
+        self.notifier.notify();
+    }
 }
 
 /// Event-loop-owned Servo backend.
@@ -97,9 +107,13 @@ impl ServoHost {
             ServoCommand::CreateView { config, reply } => {
                 let view_id = Uuid::new_v4();
                 let portable = PortableWebState::new(config.initial_url.clone());
+                let delegate = Rc::new(HostWebViewDelegate {
+                    notifier: self.notifier.clone(),
+                });
                 let webview = WebViewBuilder::new(&self.servo, self.rendering_context.clone())
                     .url(config.initial_url.clone())
                     .hidpi_scale_factor(euclid::Scale::new(config.viewport.device_scale_factor))
+                    .delegate(delegate)
                     .build();
                 webview.resize(winit::dpi::PhysicalSize::new(
                     config.viewport.width,
