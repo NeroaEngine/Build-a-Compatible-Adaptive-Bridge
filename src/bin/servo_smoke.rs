@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use embedder_traits::EventLoopWaker;
 use neroa_compatible_adaptive_bridge::{
-    LiveWebEngine, ServoHost, ServoHostNotifier, StoragePartitionId, ViewConfig, ViewId, Viewport,
+    ActivityState, LiveWebEngine, ServoHost, ServoHostNotifier, StoragePartitionId, ViewConfig,
+    ViewId, Viewport,
 };
 use servo::{RenderingContext, ServoBuilder, WindowRenderingContext};
 use tracing::warn;
@@ -119,9 +120,14 @@ impl ApplicationHandler<WakerEvent> for App {
         let completion_proxy = waker.0.clone();
         std::thread::spawn(move || {
             let runtime = tokio::runtime::Runtime::new().expect("failed to create smoke runtime");
-            let result = runtime
-                .block_on(request_proxy.create_view(config))
-                .map_err(|error| error.to_string());
+            let result = runtime.block_on(async {
+                let view_id = request_proxy.create_view(config).await?;
+                request_proxy
+                    .set_activity(view_id, ActivityState::Active)
+                    .await?;
+                Ok::<ViewId, neroa_compatible_adaptive_bridge::EngineError>(view_id)
+            });
+            let result = result.map_err(|error| error.to_string());
             let _ = completion_proxy.send_event(WakerEvent::ViewCreated(result));
         });
 
@@ -153,6 +159,7 @@ impl ApplicationHandler<WakerEvent> for App {
             WakerEvent::ViewCreated(result) => match result {
                 Ok(view_id) => {
                     state.view_id = Some(view_id);
+                    state.window.set_title("Neroa Servo Bridge Smoke - View Ready");
                     state.host.drain_commands();
                     state.window.request_redraw();
                 }
@@ -201,6 +208,18 @@ impl ApplicationHandler<WakerEvent> for App {
             }
             _ => {
                 state.host.drain_commands();
+            }
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+        if let Self::Running(state) = self {
+            // Safety net for platform event-loop implementations: even if a user
+            // wake is coalesced, bridge commands still get a deterministic drain
+            // before Winit sleeps.
+            state.host.drain_commands();
+            if state.view_id.is_some() {
+                state.window.request_redraw();
             }
         }
     }
