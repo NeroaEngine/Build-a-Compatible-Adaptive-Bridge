@@ -27,17 +27,20 @@ struct HostView {
     portable: PortableWebState,
     activity: ActivityState,
     frame_ready_count: Rc<Cell<u64>>,
+    frame_ready_pending: Rc<Cell<bool>>,
 }
 
 struct HostWebViewDelegate {
     notifier: SharedServoHostNotifier,
     frame_ready_count: Rc<Cell<u64>>,
+    frame_ready_pending: Rc<Cell<bool>>,
 }
 
 impl WebViewDelegate for HostWebViewDelegate {
     fn notify_new_frame_ready(&self, _webview: WebView) {
         self.frame_ready_count
             .set(self.frame_ready_count.get().saturating_add(1));
+        self.frame_ready_pending.set(true);
         self.notifier.notify();
     }
 }
@@ -83,8 +86,8 @@ impl ServoHost {
         }
     }
 
-    /// Drain all pending bridge commands and then give Servo one event-loop turn.
-    /// Call this from the platform host whenever its wake event fires.
+    /// Drain pending bridge commands and give Servo one event-loop turn.
+    /// A wake is not equivalent to a frame-ready notification.
     pub fn drain_commands(&mut self) {
         while let Ok(command) = self.rx.try_recv() {
             self.handle(command);
@@ -94,6 +97,18 @@ impl ServoHost {
 
     pub fn view_count(&self) -> usize {
         self.views.len()
+    }
+
+    /// Consume the current frame-ready signal for a view.
+    ///
+    /// This lets the platform event loop distinguish a generic Servo/command
+    /// wake from a real compositor frame notification, preventing redraw loops.
+    pub fn take_frame_ready(&self, view_id: ViewId) -> Result<bool, EngineError> {
+        let view = self
+            .views
+            .get(&view_id)
+            .ok_or(EngineError::ViewNotFound(view_id))?;
+        Ok(view.frame_ready_pending.replace(false))
     }
 
     /// Human-readable, non-pixel diagnostic state for the transitional smoke
@@ -128,9 +143,11 @@ impl ServoHost {
                 let view_id = Uuid::new_v4();
                 let portable = PortableWebState::new(config.initial_url.clone());
                 let frame_ready_count = Rc::new(Cell::new(0));
+                let frame_ready_pending = Rc::new(Cell::new(false));
                 let delegate = Rc::new(HostWebViewDelegate {
                     notifier: self.notifier.clone(),
                     frame_ready_count: frame_ready_count.clone(),
+                    frame_ready_pending: frame_ready_pending.clone(),
                 });
                 let webview = WebViewBuilder::new(&self.servo, self.rendering_context.clone())
                     .url(config.initial_url.clone())
@@ -150,6 +167,7 @@ impl ServoHost {
                         portable,
                         activity: ActivityState::Dormant,
                         frame_ready_count,
+                        frame_ready_pending,
                     },
                 );
                 let _ = reply.send(Ok(view_id));
@@ -213,7 +231,6 @@ impl ServoHost {
                 let result = self.with_view_mut(view_id, |view| {
                     // Activity is Neroa scheduling policy. Do not equate it with
                     // Servo visibility until a distinct visibility contract exists.
-                    // The generic LiveWebEngine scaffold only records this state.
                     view.activity = activity;
                     Ok(())
                 });
