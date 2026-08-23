@@ -1,5 +1,7 @@
 pub mod bridge;
 pub mod compatibility;
+#[cfg(feature = "chromium-runtime")]
+pub mod chromium_runtime;
 pub mod diagnostics;
 pub mod engine;
 pub mod input;
@@ -18,6 +20,11 @@ pub mod types;
 pub use bridge::{AdaptiveBridge, BridgeConfig, BridgeError, NodeSnapshot};
 pub use compatibility::{
     CompatibilityAction, CompatibilityClassifier, CompatibilityFailure, FailureClass,
+};
+#[cfg(feature = "chromium-runtime")]
+pub use chromium_runtime::{
+    ChromiumAcceleratedFrame, ChromiumEngineProxy, ChromiumGpuFrameImporter,
+    NoChromiumGpuFrameImporter,
 };
 pub use diagnostics::{BridgeDiagnosticEvent, DiagnosticRing};
 pub use engine::{EngineAdapter, EngineError, LiveWebEngine};
