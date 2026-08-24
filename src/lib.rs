@@ -23,8 +23,9 @@ pub use compatibility::{
 };
 #[cfg(feature = "chromium-runtime")]
 pub use chromium_runtime::{
-    ChromiumAcceleratedFrame, ChromiumEngineProxy, ChromiumGpuFrameImporter,
-    NoChromiumGpuFrameImporter,
+    ChromiumAcceleratedFrame, ChromiumBackend, ChromiumEngineProxy, ChromiumGpuFrameImporter,
+    ChromiumHost, ChromiumHostNotifier, NoChromiumBackend, NoChromiumGpuFrameImporter,
+    NoopChromiumHostNotifier,
 };
 pub use diagnostics::{BridgeDiagnosticEvent, DiagnosticRing};
 pub use engine::{EngineAdapter, EngineError, LiveWebEngine};
