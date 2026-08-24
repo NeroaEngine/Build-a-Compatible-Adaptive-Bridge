@@ -39,7 +39,6 @@ rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", 
 # `bundled` convenience alias. Reproduce it explicitly with its published
 # component features. `js_jit` is important here: without it mozjs_sys forces
 # a local SpiderMonkey source build on Windows and requires MozTools/LLVM.
-servo = { version = "=0.5.0", default-features = false, features = ["baked-in-resources", "bundled_freetype", "js_jit", "no-wgl"], optional = true }
 webrender_api = { version = "0.70", optional = true }
 winit = { version = "0.30.13", optional = true }
 
@@ -50,3 +49,14 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 name = "servo-smoke"
 path = "src/bin/servo_smoke.rs"
 required-features = ["servo-runtime"]
+
+# Servo rendering backend selection is platform-specific.
+# Windows retains the proven ANGLE/no-wgl path.
+# Linux must not enable mozangle/egl because mozangle 0.6.0 does not
+# provide that EGL build path on non-Windows targets.
+[target.'cfg(windows)'.dependencies]
+servo = { version = "=0.5.0", default-features = false, features = ["baked-in-resources", "bundled_freetype", "js_jit", "no-wgl"], optional = true }
+
+[target.'cfg(not(windows))'.dependencies]
+servo = { version = "=0.5.0", default-features = false, features = ["baked-in-resources", "bundled_freetype", "js_jit"], optional = true }
+
