@@ -314,6 +314,7 @@ impl ChromiumHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::LiveWebEngine;
     use crate::types::{EngineKind, StoragePartitionId};
 
     #[derive(Default)]
