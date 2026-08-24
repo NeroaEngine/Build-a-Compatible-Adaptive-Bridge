@@ -9,6 +9,7 @@ use crate::types::{
 };
 
 use super::command::ChromiumCommand;
+use super::wake::SharedChromiumHostNotifier;
 
 /// Renderer-independent, Send + Sync handle to the Chromium compatibility host.
 ///
@@ -18,31 +19,37 @@ use super::command::ChromiumCommand;
 #[derive(Clone)]
 pub struct ChromiumEngineProxy {
     tx: mpsc::UnboundedSender<ChromiumCommand>,
+    notifier: SharedChromiumHostNotifier,
     external_gpu_surface: bool,
 }
 
 impl ChromiumEngineProxy {
     pub(crate) fn new(
         tx: mpsc::UnboundedSender<ChromiumCommand>,
+        notifier: SharedChromiumHostNotifier,
         external_gpu_surface: bool,
     ) -> Self {
         Self {
             tx,
+            notifier,
             external_gpu_surface,
         }
     }
 
     pub(crate) fn channel(
+        notifier: SharedChromiumHostNotifier,
         external_gpu_surface: bool,
     ) -> (Self, mpsc::UnboundedReceiver<ChromiumCommand>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Self::new(tx, external_gpu_surface), rx)
+        (Self::new(tx, notifier, external_gpu_surface), rx)
     }
 
     fn send(&self, command: ChromiumCommand) -> Result<(), EngineError> {
         self.tx.send(command).map_err(|_| {
             EngineError::Internal("Chromium host command channel is closed".to_string())
-        })
+        })?;
+        self.notifier.notify();
+        Ok(())
     }
 
     async fn await_reply<T>(rx: oneshot::Receiver<Result<T, EngineError>>) -> Result<T, EngineError> {
@@ -153,8 +160,16 @@ impl LiveWebEngine for ChromiumEngineProxy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     fn assert_send_sync<T: Send + Sync>() {}
+
+    fn noop_notifier() -> SharedChromiumHostNotifier {
+        Arc::new(|| {})
+    }
 
     #[test]
     fn chromium_proxy_is_send_and_sync() {
@@ -163,14 +178,37 @@ mod tests {
 
     #[test]
     fn chromium_proxy_can_fail_closed_on_gpu_export() {
-        let (proxy, _rx) = ChromiumEngineProxy::channel(false);
+        let (proxy, _rx) = ChromiumEngineProxy::channel(noop_notifier(), false);
         assert!(!proxy.capabilities().external_gpu_surface);
         assert_eq!(proxy.kind(), EngineKind::Chromium);
     }
 
     #[test]
     fn chromium_proxy_reports_accelerated_gpu_capability_when_injected() {
-        let (proxy, _rx) = ChromiumEngineProxy::channel(true);
+        let (proxy, _rx) = ChromiumEngineProxy::channel(noop_notifier(), true);
         assert!(proxy.capabilities().external_gpu_surface);
+    }
+
+    #[tokio::test]
+    async fn proxy_wakes_host_after_command_enqueue() {
+        let wake_count = Arc::new(AtomicUsize::new(0));
+        let notifier_count = wake_count.clone();
+        let notifier: SharedChromiumHostNotifier = Arc::new(move || {
+            notifier_count.fetch_add(1, Ordering::SeqCst);
+        });
+        let (proxy, mut rx) = ChromiumEngineProxy::channel(notifier, false);
+
+        let request = tokio::spawn(async move {
+            proxy
+                .destroy_view(uuid::Uuid::nil())
+                .await
+                .expect_err("host has not replied");
+        });
+
+        tokio::task::yield_now().await;
+        assert_eq!(wake_count.load(Ordering::SeqCst), 1);
+        let command = rx.recv().await.expect("command should be queued");
+        command.fail("test host failure");
+        request.await.expect("request task should complete");
     }
 }
