@@ -78,6 +78,39 @@ impl ServoEngineProxy {
             reply,
         })
     }
+    // NEROA_AGENT_SURFACE_V7
+    pub async fn evaluate(&self, view_id: ViewId, script: String) -> Result<String, EngineError> {
+        let (reply, rx) = oneshot::channel();
+
+        self.send(ServoCommand::Evaluate {
+            view_id,
+            script,
+            reply,
+        })?;
+
+        Self::await_reply(rx).await
+    }
+
+    pub async fn traverse(&self, view_id: ViewId, delta: i32) -> Result<bool, EngineError> {
+        let (reply, rx) = oneshot::channel();
+
+        self.send(ServoCommand::Traverse {
+            view_id,
+            delta,
+            reply,
+        })?;
+
+        Self::await_reply(rx).await
+    }
+
+    pub async fn reload(&self, view_id: ViewId) -> Result<(), EngineError> {
+        let (reply, rx) = oneshot::channel();
+
+        self.send(ServoCommand::Reload { view_id, reply })?;
+
+        Self::await_reply(rx).await
+    }
+
     async fn await_reply<T>(
         rx: oneshot::Receiver<Result<T, EngineError>>,
     ) -> Result<T, EngineError> {

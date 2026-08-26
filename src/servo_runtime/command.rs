@@ -55,4 +55,24 @@ pub(crate) enum ServoCommand {
         view_id: ViewId,
         reply: Reply<Option<SharedGpuSurface>>,
     },
+    // NEROA_AGENT_SURFACE_V7
+    //
+    // Script evaluation and history traversal, awaited across the thread
+    // boundary. The agent surface is built entirely on these two plus the
+    // input and navigation commands that already exist.
+    Evaluate {
+        view_id: ViewId,
+        script: String,
+        reply: Reply<String>,
+    },
+    Traverse {
+        view_id: ViewId,
+        /// Negative goes back, positive goes forward.
+        delta: i32,
+        reply: Reply<bool>,
+    },
+    Reload {
+        view_id: ViewId,
+        reply: Reply<()>,
+    },
 }

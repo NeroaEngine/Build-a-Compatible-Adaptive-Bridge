@@ -1,3 +1,7 @@
+// NEROA_AGENT_SURFACE_V7 / NEROA_TRAINING_SURFACE_V7
+#[cfg(feature = "servo-runtime")]
+pub mod agent;
+
 pub mod bridge;
 #[cfg(feature = "chromium-runtime")]
 pub mod chromium_runtime;

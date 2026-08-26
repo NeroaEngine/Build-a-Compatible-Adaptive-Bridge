@@ -171,6 +171,48 @@ impl WebViewDelegate for HostWebViewDelegate {
     }
 }
 
+/// Translate Servo's script result into JSON.
+///
+/// NEROA_AGENT_SURFACE_V7: the agent surface speaks JSON so a page result can
+/// cross the thread boundary and be handed to a model without a Servo type
+/// leaking into the contract. Handles that are only meaningful inside the
+/// engine (elements, frames, windows) become opaque tagged strings rather
+/// than pretending to be values.
+fn js_value_to_json(value: &servo::JSValue) -> serde_json::Value {
+    use serde_json::Value;
+
+    match value {
+        servo::JSValue::Undefined | servo::JSValue::Null => Value::Null,
+
+        servo::JSValue::Boolean(value) => Value::Bool(*value),
+
+        servo::JSValue::Number(value) => serde_json::Number::from_f64(*value)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+
+        servo::JSValue::String(value) => Value::String(value.clone()),
+
+        servo::JSValue::Element(handle) => Value::String(format!("[element {handle}]")),
+
+        servo::JSValue::ShadowRoot(handle) => Value::String(format!("[shadowroot {handle}]")),
+
+        servo::JSValue::Frame(handle) => Value::String(format!("[frame {handle}]")),
+
+        servo::JSValue::Window(handle) => Value::String(format!("[window {handle}]")),
+
+        servo::JSValue::Array(values) => {
+            Value::Array(values.iter().map(js_value_to_json).collect())
+        }
+
+        servo::JSValue::Object(entries) => Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| (key.clone(), js_value_to_json(value)))
+                .collect(),
+        ),
+    }
+}
+
 /// Servo backend owned by the dedicated Servo host thread.
 ///
 /// This type is intentionally NOT Send/Sync. It owns Servo/WebView/Rc state and
@@ -493,6 +535,76 @@ impl ServoHost {
                     view.portable = state;
                     Ok(())
                 });
+                let _ = reply.send(result);
+                self.notifier.notify();
+            }
+            // NEROA_AGENT_SURFACE_V7
+            ServoCommand::Evaluate {
+                view_id,
+                script,
+                reply,
+            } => {
+                match self.views.get(&view_id) {
+                    Some(view) => {
+                        // The reply is resolved from Servo's callback, so the
+                        // caller awaits the script's actual result rather than
+                        // its submission.
+                        view.webview.evaluate_javascript(script, move |result| {
+                            let outcome = match result {
+                                Ok(value) => Ok(js_value_to_json(&value).to_string()),
+
+                                Err(error) => Err(EngineError::Internal(format!(
+                                    "script evaluation failed: {error:?}"
+                                ))),
+                            };
+
+                            let _ = reply.send(outcome);
+                        });
+                    }
+
+                    None => {
+                        let _ = reply.send(Err(EngineError::ViewNotFound(view_id)));
+                    }
+                }
+
+                self.notifier.notify();
+            }
+            ServoCommand::Traverse {
+                view_id,
+                delta,
+                reply,
+            } => {
+                let result = self.with_view_mut(view_id, |view| {
+                    if delta < 0 {
+                        let amount = delta.unsigned_abs() as usize;
+
+                        if !view.webview.can_go_back() {
+                            return Ok(false);
+                        }
+
+                        view.webview.go_back(amount);
+                    } else if delta > 0 {
+                        let amount = delta as usize;
+
+                        if !view.webview.can_go_forward() {
+                            return Ok(false);
+                        }
+
+                        view.webview.go_forward(amount);
+                    }
+
+                    Ok(true)
+                });
+
+                let _ = reply.send(result);
+                self.notifier.notify();
+            }
+            ServoCommand::Reload { view_id, reply } => {
+                let result = self.with_view_mut(view_id, |view| {
+                    view.webview.reload();
+                    Ok(())
+                });
+
                 let _ = reply.send(result);
                 self.notifier.notify();
             }
