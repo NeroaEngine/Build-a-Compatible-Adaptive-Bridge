@@ -78,10 +78,11 @@ pub fn level_for(kind: &str) -> Level {
         "browser.navigate"
         | "vscode.file.opened"
         | "vscode.file.edited"
-        | "vscode.file.saved" => Level::DataIo,
+        | "vscode.file.saved"
+        | "code.file.saved" => Level::DataIo,
 
         // Build and artifact provenance.
-        "build.started" | "build.produced" | "artifact.produced" => Level::Build,
+        "build.started" | "build.produced" | "artifact.produced" | "code.build" => Level::Build,
 
         // Ordinary application activity - high volume, sealed every 10,000.
         // Keystrokes, clicks, commands. This is where the volume lives and it
@@ -90,7 +91,9 @@ pub fn level_for(kind: &str) -> Level {
         | "browser.key"
         | "agent.action"
         | "vscode.command.run"
-        | "vscode.extension.invoked" => Level::Application,
+        | "vscode.extension.invoked"
+        | "code.run"
+        | "code.session.opened" => Level::Application,
 
         // Unmapped: fail safe to L1, never up to L5.
         _ => Level::Application,

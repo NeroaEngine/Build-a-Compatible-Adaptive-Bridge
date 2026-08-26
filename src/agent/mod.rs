@@ -12,10 +12,12 @@
 //! engine the compositor is drawing. There is no socket, no JSON-RPC round
 //! trip, and no screenshot needed to know what is on the page.
 
+mod code_ide;
 mod observation;
 mod recorder;
 mod semantics;
 
+pub use code_ide::{CodeIde, EditorFamily, SurfaceKind, detect_code_ide, launch_presets};
 pub use observation::{
     ConsoleError, ElementHandle, PageObservation, RepaintRecord, qc_instrumentation_script,
 };
