@@ -288,6 +288,106 @@ pub fn resolve_token(env_name: Option<&str>, file_path: Option<&str>) -> Option<
     None
 }
 
+/// Resolve a secret from the Neroa vault resolver.
+///
+/// NEROA_ROS_VAULT_RESOLVE_V16
+///
+/// This is the handoff's preferred credential path: ask the vault for the ref,
+/// typed, at startup - one place to rotate, one place to audit - the same way
+/// the ROS node itself gets its token. The resolver binds a local port and
+/// answers `POST /v1/resolve` with `{ok, ref, type, secret}`, and it binds the
+/// answer to the question so a substituted resolver cannot return the seal
+/// passphrase in answer to a request for the API token.
+///
+/// The resolver's own token comes from a file, never argv.
+pub async fn resolve_from_vault(
+    resolver_url: &str,
+    resolver_token_file: &str,
+    secret_ref: &str,
+    expected_type: &str,
+) -> Result<String, RosError> {
+    let resolver_token = std::fs::read_to_string(resolver_token_file)
+        .map_err(|error| RosError::Http(format!("resolver token unreadable: {error}")))?
+        .trim()
+        .to_string();
+
+    if resolver_token.is_empty() {
+        return Err(RosError::Http("resolver token file is empty".to_string()));
+    }
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "ref": secret_ref,
+        "expectedType": expected_type,
+    }))
+    .map_err(|error| RosError::Http(format!("encode: {error}")))?;
+
+    let connector = HttpsConnectorBuilder::new()
+        .with_webpki_roots()
+        .https_or_http()
+        .enable_http1()
+        .build();
+
+    let client: Client<_, Full<Bytes>> =
+        Client::builder(TokioExecutor::new()).build(connector);
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("{}/v1/resolve", resolver_url.trim_end_matches('/')))
+        .header("content-type", "application/json")
+        .header("x-neroa-resolver-token", resolver_token)
+        .body(Full::new(Bytes::from(body)))
+        .map_err(|error| RosError::Http(format!("request build: {error}")))?;
+
+    let response = client
+        .request(request)
+        .await
+        .map_err(|error| RosError::Http(format!("resolver unreachable: {error}")))?;
+
+    let status = response.status().as_u16();
+
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .map_err(|error| RosError::Http(format!("read body: {error}")))?
+        .to_bytes();
+
+    if status != 200 {
+        return Err(RosError::Rejected {
+            status,
+            body: String::from_utf8_lossy(&bytes).to_string(),
+        });
+    }
+
+    #[derive(Deserialize)]
+    struct Resolved {
+        ok: bool,
+        #[serde(rename = "ref")]
+        ref_: String,
+        #[serde(rename = "type")]
+        type_: String,
+        secret: String,
+    }
+
+    let resolved: Resolved = serde_json::from_slice(&bytes)
+        .map_err(|error| RosError::Http(format!("decode: {error}")))?;
+
+    // Bind the answer to the question - the resolver may not have substituted a
+    // different secret than the one asked for.
+    if !resolved.ok
+        || resolved.ref_ != secret_ref
+        || resolved.type_ != expected_type
+        || resolved.secret.is_empty()
+    {
+        return Err(RosError::Http(format!(
+            "resolver answered about {}/{}, asked for {secret_ref}/{expected_type}",
+            resolved.ref_, resolved.type_,
+        )));
+    }
+
+    Ok(resolved.secret)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
