@@ -52,6 +52,51 @@ impl Level {
     }
 }
 
+/// The single authority on what level a receipt kind carries.
+///
+/// NEROA_ROS_LEVEL_MAP_V17
+///
+/// The level is a governance decision about blast radius, and the ROS
+/// architecture note is explicit: decide it once in a mapping, and never let
+/// a caller choose. A caller that can pick L5 can stall the node - L5 seals one
+/// receipt at a time under a ~1.3s hybrid signature, so a keystroke on the
+/// authority ledger would wedge it - and can fill the never-pruned ledger.
+///
+/// Unknown kinds fall to L1, never L5: an unmapped event must not accidentally
+/// land on the authority ledger.
+pub fn level_for(kind: &str) -> Level {
+    match kind {
+        // Authority - the decisions you will be asked to prove. Never pruned,
+        // sealed one at a time, so only genuine authority events belong here.
+        "fluid.content.served"
+        | "fluid.content.withheld"
+        | "runtime.attested"
+        | "runtime.admitted"
+        | "runtime.frozen" => Level::Authority,
+
+        // Data crossing a boundary.
+        "browser.navigate"
+        | "vscode.file.opened"
+        | "vscode.file.edited"
+        | "vscode.file.saved" => Level::DataIo,
+
+        // Build and artifact provenance.
+        "build.started" | "build.produced" | "artifact.produced" => Level::Build,
+
+        // Ordinary application activity - high volume, sealed every 10,000.
+        // Keystrokes, clicks, commands. This is where the volume lives and it
+        // must stay here.
+        "browser.pointer"
+        | "browser.key"
+        | "agent.action"
+        | "vscode.command.run"
+        | "vscode.extension.invoked" => Level::Application,
+
+        // Unmapped: fail safe to L1, never up to L5.
+        _ => Level::Application,
+    }
+}
+
 /// What a submitted reference is worth at the moment it was returned.
 ///
 /// `in_ledger` is not `witnessed`. The handoff is explicit: do not render
@@ -207,6 +252,17 @@ impl RosClient {
             writer: response.writer,
             proven: response.proven,
         })
+    }
+
+    /// Submit by kind, with the level taken from [`level_for`] - the only
+    /// entry point ordinary emitters should use, because it makes the caller
+    /// unable to choose the level.
+    pub async fn submit_kind(
+        &self,
+        kind: &str,
+        evidence: serde_json::Value,
+    ) -> Result<ReceiptRef, RosError> {
+        self.submit(level_for(kind), kind, evidence).await
     }
 
     /// Verify a reference. Returns the distinct verdict; the caller must keep
@@ -416,6 +472,22 @@ mod tests {
         assert_eq!(keys, expected);
         assert_eq!(json["level"], 1);
         assert_eq!(json["submittedBy"], "spatial-browser");
+    }
+
+    #[test]
+    fn keystrokes_stay_on_l1_and_authority_is_reserved() {
+        // The failure the mapping exists to prevent: a high-volume event on L5.
+        assert_eq!(level_for("browser.key"), Level::Application);
+        assert_eq!(level_for("browser.pointer"), Level::Application);
+        assert_eq!(level_for("vscode.command.run"), Level::Application);
+        // Genuine authority events, and only those, reach L5.
+        assert_eq!(level_for("runtime.attested"), Level::Authority);
+        assert_eq!(level_for("fluid.content.withheld"), Level::Authority);
+        // Data-io and build map correctly.
+        assert_eq!(level_for("vscode.file.saved"), Level::DataIo);
+        assert_eq!(level_for("build.produced"), Level::Build);
+        // Unknown fails safe to L1, never L5.
+        assert_eq!(level_for("something.unmapped"), Level::Application);
     }
 
     #[test]
