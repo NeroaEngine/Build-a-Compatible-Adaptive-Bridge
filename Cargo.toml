@@ -22,6 +22,15 @@ servo-runtime = [
 # Loopback OAuth (RFC 8252). Uses the HTTP/TLS stack Servo already pulls in,
 # so it adds no heavy new dependency; kept behind a feature so a build that
 # only wants the bridge does not compile a web client.
+# NEROA_ROS_CLIENT_V14: the Receipt OS client shares the same http stack.
+ros = [
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:http-body-util",
+    "dep:hyper-rustls",
+    "dep:rustls",
+]
+
 oauth = [
     "dep:hyper",
     "dep:hyper-util",

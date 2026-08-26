@@ -6,6 +6,10 @@ pub mod agent;
 #[cfg(feature = "oauth")]
 pub mod oauth;
 
+// NEROA_ROS_CLIENT_V14
+#[cfg(feature = "ros")]
+pub mod ros;
+
 pub mod bridge;
 #[cfg(feature = "chromium-runtime")]
 pub mod chromium_runtime;
