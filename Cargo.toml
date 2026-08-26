@@ -17,6 +17,22 @@ servo-runtime = [
     "dep:winit",
 ]
 
+# NEROA_OAUTH_LOOPBACK_V11
+#
+# Loopback OAuth (RFC 8252). Uses the HTTP/TLS stack Servo already pulls in,
+# so it adds no heavy new dependency; kept behind a feature so a build that
+# only wants the bridge does not compile a web client.
+oauth = [
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:http-body-util",
+    "dep:hyper-rustls",
+    "dep:rustls",
+    "dep:base64",
+    "dep:sha2",
+    "dep:rand",
+]
+
 [dependencies]
 async-trait = "0.1"
 glam = "0.30"
@@ -35,6 +51,16 @@ uuid = { version = "1", features = ["v4", "serde"] }
 embedder_traits = { package = "servo-embedder-traits", version = "=0.5.0", optional = true }
 euclid = { version = "0.22", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "logging", "std", "tls12"], optional = true }
+
+# NEROA_OAUTH_LOOPBACK_V11: already present transitively via Servo, pinned
+# here so the oauth feature compiles standalone.
+hyper = { version = "1", features = ["client", "http1"], optional = true }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"], optional = true }
+http-body-util = { version = "0.1", optional = true }
+hyper-rustls = { version = "0.27", default-features = false, features = ["ring", "http1", "tls12", "webpki-roots"], optional = true }
+base64 = { version = "0.22", optional = true }
+sha2 = { version = "0.10", optional = true }
+rand = { version = "0.9", optional = true }
 # The published crates.io package does not expose Servo's workspace-only
 # `bundled` convenience alias. Reproduce it explicitly with its published
 # component features. `js_jit` is important here: without it mozjs_sys forces

@@ -2,6 +2,10 @@
 #[cfg(feature = "servo-runtime")]
 pub mod agent;
 
+// NEROA_OAUTH_LOOPBACK_V11
+#[cfg(feature = "oauth")]
+pub mod oauth;
+
 pub mod bridge;
 #[cfg(feature = "chromium-runtime")]
 pub mod chromium_runtime;
