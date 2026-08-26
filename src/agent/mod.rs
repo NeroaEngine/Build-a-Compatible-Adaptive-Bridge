@@ -13,10 +13,12 @@
 //! trip, and no screenshot needed to know what is on the page.
 
 mod observation;
+mod receipt;
 mod recorder;
 mod semantics;
 
 pub use observation::{ElementHandle, PageObservation};
+pub use receipt::{ReceiptContext, ReceiptEmitter, TrainingReceipt};
 pub use recorder::{TrainingRecorder, TrainingStep};
 pub use semantics::{
     SemanticNode, SemanticTree, SharedSemanticTree, apply_update,
