@@ -52,6 +52,14 @@ struct HostWebViewDelegate {
 impl WebViewDelegate for HostWebViewDelegate {
     // NEROA_NAVIGATION_WAKE_COALESCE_V1C
     fn notify_load_status_changed(&self, _webview: WebView, status: servo::LoadStatus) {
+        // NEROA_IN_PAGE_NAVIGATION_VISIBILITY_V2M
+        //
+        // NAV_ADAPTER_BEGIN only fires for address-bar navigation, which goes
+        // through ServoCommand::Navigate. A link click navigates entirely
+        // inside Servo, so in-page navigation used to leave no trace at all
+        // and could only be confirmed by asking the user what they saw.
+        eprintln!("NEROA_WEBVIEW_LOAD_STATUS status={:?}", status);
+
         if status != servo::LoadStatus::Complete {
             return;
         }
@@ -85,6 +93,19 @@ impl WebViewDelegate for HostWebViewDelegate {
     // (paint::webview_renderer: "Empty hit test result ... ignoring").
     // Pair this with NEROA_INPUT_DISPATCH to see, per event id, whether a
     // click actually reached the DOM or was dropped on the floor.
+    // NEROA_IN_PAGE_NAVIGATION_VISIBILITY_V2M
+    fn notify_url_changed(&self, _webview: WebView, url: url::Url) {
+        eprintln!("NEROA_WEBVIEW_URL_CHANGED url={}", url);
+    }
+
+    fn notify_history_changed(&self, _webview: WebView, entries: Vec<url::Url>, current: usize) {
+        eprintln!(
+            "NEROA_WEBVIEW_HISTORY entries={} current={}",
+            entries.len(),
+            current,
+        );
+    }
+
     fn notify_input_event_handled(
         &self,
         _webview: WebView,
