@@ -29,7 +29,7 @@ mod provider;
 mod server;
 mod token;
 
-pub use provider::{OAuthProvider, google};
+pub use provider::{OAuthProvider, custom, github, google, microsoft};
 pub use token::{TokenSet, TokenStore};
 
 use std::time::Duration;

@@ -35,6 +35,65 @@ pub fn google(client_id: impl Into<String>, scopes: Vec<String>) -> OAuthConfig 
     }
 }
 
+/// GitHub. No verification gate - a registered OAuth app is public
+/// immediately. GitHub does not use PKCE, but sending the challenge is
+/// harmless and the code path is shared.
+pub fn github(client_id: impl Into<String>, scopes: Vec<String>) -> OAuthConfig {
+    OAuthConfig {
+        provider: OAuthProvider {
+            name: "github",
+            auth_endpoint: "https://github.com/login/oauth/authorize",
+            token_endpoint: "https://github.com/login/oauth/access_token",
+            extra_auth_params: &[],
+        },
+        client_id: client_id.into(),
+        client_secret: None,
+        scopes,
+    }
+}
+
+/// Microsoft identity platform (Outlook, OneDrive, Graph). The "common"
+/// tenant lets both work and personal accounts sign in. Requires publisher
+/// verification before it can go public, like Google.
+pub fn microsoft(client_id: impl Into<String>, scopes: Vec<String>) -> OAuthConfig {
+    OAuthConfig {
+        provider: OAuthProvider {
+            name: "microsoft",
+            auth_endpoint: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+            token_endpoint: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+            // offline_access is what yields a refresh token here.
+            extra_auth_params: &[("prompt", "select_account")],
+        },
+        client_id: client_id.into(),
+        client_secret: None,
+        scopes,
+    }
+}
+
+/// A provider Neroa does not ship a constructor for. Every OAuth 2.0 +
+/// PKCE service fits this: supply its two endpoints and you are done, which
+/// is the whole point of the loopback design - the mechanism is universal,
+/// only the endpoints and scopes differ.
+pub fn custom(
+    name: &'static str,
+    auth_endpoint: &'static str,
+    token_endpoint: &'static str,
+    client_id: impl Into<String>,
+    scopes: Vec<String>,
+) -> OAuthConfig {
+    OAuthConfig {
+        provider: OAuthProvider {
+            name,
+            auth_endpoint,
+            token_endpoint,
+            extra_auth_params: &[],
+        },
+        client_id: client_id.into(),
+        client_secret: None,
+        scopes,
+    }
+}
+
 /// Build the consent URL the user opens in their real browser.
 pub fn authorization_url(
     config: &OAuthConfig,
