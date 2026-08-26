@@ -14,9 +14,13 @@
 
 mod observation;
 mod recorder;
+mod semantics;
 
 pub use observation::{ElementHandle, PageObservation};
 pub use recorder::{TrainingRecorder, TrainingStep};
+pub use semantics::{
+    SemanticNode, SemanticTree, SharedSemanticTree, apply_update,
+};
 
 use serde::{Deserialize, Serialize};
 

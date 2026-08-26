@@ -40,6 +40,8 @@ struct HostView {
 type TracedInputIds = Rc<std::cell::RefCell<std::collections::HashSet<InputEventId>>>;
 
 struct HostWebViewDelegate {
+    // NEROA_SEMANTIC_TREE_V9
+    semantics: crate::agent::SharedSemanticTree,
     traced_input_ids: TracedInputIds,
     notifier: SharedServoHostNotifier,
     frame_ready_count: Rc<Cell<u64>>,
@@ -93,6 +95,19 @@ impl WebViewDelegate for HostWebViewDelegate {
     // (paint::webview_renderer: "Empty hit test result ... ignoring").
     // Pair this with NEROA_INPUT_DISPATCH to see, per event id, whether a
     // click actually reached the DOM or was dropped on the floor.
+    // NEROA_SEMANTIC_TREE_V9
+    //
+    // Servo maintains this as part of layout, so it costs nothing extra and
+    // describes what the page presents rather than what its markup happens to
+    // look like.
+    fn notify_accessibility_tree_update(
+        &self,
+        _webview: WebView,
+        tree_update: servo::accesskit::TreeUpdate,
+    ) {
+        crate::agent::apply_update(&self.semantics, &tree_update);
+    }
+
     // NEROA_IN_PAGE_NAVIGATION_VISIBILITY_V2M
     fn notify_url_changed(&self, _webview: WebView, url: url::Url) {
         eprintln!("NEROA_WEBVIEW_URL_CHANGED url={}", url);
@@ -225,6 +240,9 @@ pub struct ServoHost {
     rx: mpsc::UnboundedReceiver<ServoCommand>,
     notifier: SharedServoHostNotifier,
     views: HashMap<ViewId, HostView>,
+
+    // NEROA_SEMANTIC_TREE_V9
+    semantics: crate::agent::SharedSemanticTree,
 }
 
 impl ServoHost {
@@ -274,7 +292,17 @@ impl ServoHost {
             rx,
             notifier,
             views: HashMap::new(),
+
+            semantics: Default::default(),
         }
+    }
+
+    /// Live semantic tree of the most recently updated document.
+    ///
+    /// NEROA_SEMANTIC_TREE_V9: shared, so a caller can read it without going
+    /// through the command channel.
+    pub fn semantics(&self) -> crate::agent::SharedSemanticTree {
+        self.semantics.clone()
     }
 
     /// Drain pending bridge commands and give Servo one event-loop turn.
@@ -383,7 +411,10 @@ impl ServoHost {
                 let traced_input_ids: TracedInputIds = Rc::new(std::cell::RefCell::new(
                     std::collections::HashSet::new(),
                 ));
+                let semantics = self.semantics.clone();
+
                 let delegate = Rc::new(HostWebViewDelegate {
+                    semantics: semantics.clone(),
                     traced_input_ids: traced_input_ids.clone(),
                     notifier: self.notifier.clone(),
                     frame_ready_count: frame_ready_count.clone(),
@@ -401,6 +432,21 @@ impl ServoHost {
                     config.viewport.width,
                     config.viewport.height,
                 ));
+
+                // NEROA_SEMANTIC_TREE_V9: no tree is produced unless this is
+                // switched on, and it additionally requires the
+                // accessibility_enabled preference at engine start.
+                match webview.set_accessibility_active(true) {
+                    Some(tree_id) => {
+                        eprintln!("NEROA_SEMANTIC_TREE_ACTIVE tree={tree_id:?}");
+                    }
+
+                    None => {
+                        eprintln!(
+                            "NEROA_SEMANTIC_TREE_UNAVAILABLE                              (accessibility_enabled preference is off)"
+                        );
+                    }
+                }
 
                 self.views.insert(
                     view_id,
