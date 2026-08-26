@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use servo::{
     InputEvent, InputEventId, InputEventResult, MouseButton as ServoMouseButton, MouseButtonAction,
-    MouseButtonEvent, MouseMoveEvent, RenderingContext, Servo, WebView, WebViewBuilder,
-    WebViewDelegate, WheelDelta, WheelEvent, WheelMode,
+    MouseButtonEvent, MouseMoveEvent, RenderingContext, Servo, UserContentManager, UserScript,
+    WebView, WebViewBuilder, WebViewDelegate, WheelDelta, WheelEvent, WheelMode,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -423,9 +423,21 @@ impl ServoHost {
                     navigation_loading: navigation_loading.clone(),
                     navigation_frame_seen: navigation_frame_seen.clone(),
                 });
+                // NEROA_QC_OBSERVATION_V18: install the QC instrumentation as a
+                // user script so it runs at head parse, before app listeners
+                // attach. Wrapping addEventListener there is the only way to
+                // see delegated listeners, which the DOM does not reflect.
+                let user_content = Rc::new(UserContentManager::new(&self.servo));
+
+                user_content.add_script(Rc::new(UserScript::new(
+                    crate::agent::qc_instrumentation_script().to_string(),
+                    None,
+                )));
+
                 let webview = WebViewBuilder::new(&self.servo, self.rendering_context.clone())
                     .url(config.initial_url.clone())
                     .hidpi_scale_factor(euclid::Scale::new(config.viewport.device_scale_factor))
+                    .user_content_manager(user_content)
                     .delegate(delegate)
                     .build();
                 webview.resize(winit::dpi::PhysicalSize::new(
