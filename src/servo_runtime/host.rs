@@ -248,6 +248,31 @@ impl ServoHost {
         self.views.len()
     }
 
+    /// Evaluate JavaScript in a view and deliver the result to `callback`.
+    ///
+    /// NEROA_SCROLL_METRICS_V5: Servo 0.5 paints no scrollbars, so the shell
+    /// has to draw one, and that needs the page's real scroll extent rather
+    /// than an accumulated wheel delta (which drifts past the true bounds as
+    /// soon as Servo clamps a scroll). Asking the document directly is exact.
+    ///
+    /// This is also the first use of the script seam that the AI view will
+    /// depend on: page state in, structured value out, no scraping.
+    pub fn evaluate_javascript(
+        &self,
+        view_id: ViewId,
+        script: String,
+        callback: impl FnOnce(Result<servo::JSValue, servo::JavaScriptEvaluationError>) + 'static,
+    ) -> Result<(), EngineError> {
+        let view = self
+            .views
+            .get(&view_id)
+            .ok_or(EngineError::ViewNotFound(view_id))?;
+
+        view.webview.evaluate_javascript(script, callback);
+
+        Ok(())
+    }
+
     /// Force the next host tick to repaint this view.
     ///
     /// NEROA_TABS_V4: switching tabs paints a different WebView into the same
