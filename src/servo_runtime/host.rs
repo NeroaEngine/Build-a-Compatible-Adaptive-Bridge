@@ -248,6 +248,23 @@ impl ServoHost {
         self.views.len()
     }
 
+    /// Force the next host tick to repaint this view.
+    ///
+    /// NEROA_TABS_V4: switching tabs paints a different WebView into the same
+    /// shared surface. Servo will not emit a new-frame notification for a
+    /// document that has not changed, so the tab that is becoming active has
+    /// to be marked ready explicitly or the surface keeps showing the old tab.
+    pub fn mark_frame_ready(&self, view_id: ViewId) -> Result<(), EngineError> {
+        let view = self
+            .views
+            .get(&view_id)
+            .ok_or(EngineError::ViewNotFound(view_id))?;
+
+        view.frame_ready_pending.set(true);
+
+        Ok(())
+    }
+
     /// Consume the current frame-ready signal for a view.
     ///
     /// This lets the platform event loop distinguish a generic Servo/command
