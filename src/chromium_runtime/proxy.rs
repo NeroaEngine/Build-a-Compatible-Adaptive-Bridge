@@ -52,10 +52,11 @@ impl ChromiumEngineProxy {
         Ok(())
     }
 
-    async fn await_reply<T>(rx: oneshot::Receiver<Result<T, EngineError>>) -> Result<T, EngineError> {
-        rx.await.map_err(|_| {
-            EngineError::Internal("Chromium host dropped command reply".to_string())
-        })?
+    async fn await_reply<T>(
+        rx: oneshot::Receiver<Result<T, EngineError>>,
+    ) -> Result<T, EngineError> {
+        rx.await
+            .map_err(|_| EngineError::Internal("Chromium host dropped command reply".to_string()))?
     }
 }
 

@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use servo::{
-    InputEvent, MouseButton as ServoMouseButton, MouseButtonAction, MouseButtonEvent,
-    MouseMoveEvent, RenderingContext, Servo, WebView, WebViewBuilder, WebViewDelegate, WheelDelta,
-    WheelEvent, WheelMode,
+    InputEvent, InputEventId, InputEventResult, MouseButton as ServoMouseButton, MouseButtonAction,
+    MouseButtonEvent, MouseMoveEvent, RenderingContext, Servo, WebView, WebViewBuilder,
+    WebViewDelegate, WheelDelta, WheelEvent, WheelMode,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -13,8 +13,8 @@ use webrender_api::units::DevicePoint;
 
 use crate::engine::EngineError;
 use crate::types::{
-    ActivityState, BrowserInput, ButtonState, MouseButton, PortableWebState, ScrollMode, ViewConfig,
-    ViewId,
+    ActivityState, BrowserInput, ButtonState, MouseButton, PortableWebState, ScrollMode,
+    ViewConfig, ViewId,
 };
 
 use super::command::ServoCommand;
@@ -24,26 +24,129 @@ use super::proxy::ServoEngineProxy;
 use super::wake::{ServoHostNotifier, SharedServoHostNotifier};
 
 struct HostView {
+    traced_input_ids: TracedInputIds,
     webview: WebView,
     config: ViewConfig,
     portable: PortableWebState,
     activity: ActivityState,
     frame_ready_count: Rc<Cell<u64>>,
     frame_ready_pending: Rc<Cell<bool>>,
+    // NEROA_NAVIGATION_FRAME_QUARANTINE_V1B
+    navigation_generation: Rc<Cell<u64>>,
+    navigation_loading: Rc<Cell<bool>>,
+    navigation_frame_seen: Rc<Cell<bool>>,
 }
 
+type TracedInputIds = Rc<std::cell::RefCell<std::collections::HashSet<InputEventId>>>;
+
 struct HostWebViewDelegate {
+    traced_input_ids: TracedInputIds,
     notifier: SharedServoHostNotifier,
     frame_ready_count: Rc<Cell<u64>>,
     frame_ready_pending: Rc<Cell<bool>>,
+    navigation_generation: Rc<Cell<u64>>,
+    navigation_loading: Rc<Cell<bool>>,
+    navigation_frame_seen: Rc<Cell<bool>>,
 }
 
 impl WebViewDelegate for HostWebViewDelegate {
+    // NEROA_NAVIGATION_WAKE_COALESCE_V1C
+    fn notify_load_status_changed(&self, _webview: WebView, status: servo::LoadStatus) {
+        if status != servo::LoadStatus::Complete {
+            return;
+        }
+
+        if !self.navigation_loading.replace(false) {
+            return;
+        }
+
+        let generation = self.navigation_generation.get();
+
+        eprintln!("NEROA_NAV_ADAPTER_LOAD_COMPLETE generation={}", generation,);
+
+        // NEROA_NAV_QUARANTINE_RELEASE_V2H
+        //
+        // Always hand the compositor back to the normal path. Gating the
+        // release on having seen a quarantined frame meant a document that
+        // finished loading before its first frame left frame_ready_pending
+        // false with nothing scheduled to set it.
+        self.navigation_frame_seen.set(false);
+
+        if !self.frame_ready_pending.replace(true) {
+            eprintln!("NEROA_NAV_ADAPTER_FRAME_RELEASE generation={}", generation,);
+
+            self.notifier.notify();
+        }
+    }
+
+    // NEROA_INPUT_OUTCOME_TRACE_V2H
+    //
+    // Servo silently discards any pointer event whose hit test is empty
+    // (paint::webview_renderer: "Empty hit test result ... ignoring").
+    // Pair this with NEROA_INPUT_DISPATCH to see, per event id, whether a
+    // click actually reached the DOM or was dropped on the floor.
+    fn notify_input_event_handled(
+        &self,
+        _webview: WebView,
+        event_id: InputEventId,
+        result: InputEventResult,
+    ) {
+        if !self.traced_input_ids.borrow_mut().remove(&event_id) {
+            return;
+        }
+
+        eprintln!(
+            "NEROA_INPUT_RESULT id={:?} consumed={} default_prevented={} dispatch_failed={}",
+            event_id,
+            result.contains(InputEventResult::Consumed),
+            result.contains(InputEventResult::DefaultPrevented),
+            result.contains(InputEventResult::DispatchFailed),
+        );
+    }
+
+    // NEROA_WEBVIEW_FAILURE_VISIBILITY_V2H
+    //
+    // Without these, a dead content process is indistinguishable from a
+    // slow page: both produce no log output at all.
+    fn notify_crashed(&self, _webview: WebView, reason: String, _backtrace: Option<String>) {
+        eprintln!("NEROA_WEBVIEW_CRASHED reason={}", reason);
+
+        self.navigation_loading.set(false);
+
+        if !self.frame_ready_pending.replace(true) {
+            self.notifier.notify();
+        }
+    }
+
+    fn show_console_message(&self, _webview: WebView, level: servo::ConsoleLogLevel, message: String) {
+        if matches!(level, servo::ConsoleLogLevel::Error) {
+            eprintln!("NEROA_WEBVIEW_CONSOLE_ERROR {}", message);
+        }
+    }
+
     fn notify_new_frame_ready(&self, _webview: WebView) {
         self.frame_ready_count
             .set(self.frame_ready_count.get().saturating_add(1));
-        self.frame_ready_pending.set(true);
-        self.notifier.notify();
+
+        // During navigation we retain only the fact that at least
+        // one new-document frame exists. Do not wake the host for
+        // every intermediate Servo frame.
+        if self.navigation_loading.get() {
+            if !self.navigation_frame_seen.replace(true) {
+                eprintln!(
+                    "NEROA_NAV_ADAPTER_FIRST_FRAME_QUARANTINED generation={}",
+                    self.navigation_generation.get(),
+                );
+            }
+
+            return;
+        }
+
+        // Level-triggered frame readiness: at most one outstanding
+        // wake exists until the host consumes frame_ready_pending.
+        if !self.frame_ready_pending.replace(true) {
+            self.notifier.notify();
+        }
     }
 }
 
@@ -90,13 +193,7 @@ impl ServoHost {
     ) -> (ServoEngineProxy, Self) {
         let external_gpu_surface = frame_source.supports_external_gpu_surface();
         let (proxy, rx) = ServoEngineProxy::channel(notifier.clone(), external_gpu_surface);
-        let host = Self::new(
-            servo,
-            rendering_context,
-            frame_source,
-            rx,
-            notifier,
-        );
+        let host = Self::new(servo, rendering_context, frame_source, rx, notifier);
         (proxy, host)
     }
 
@@ -175,10 +272,20 @@ impl ServoHost {
                 let portable = PortableWebState::new(config.initial_url.clone());
                 let frame_ready_count = Rc::new(Cell::new(0));
                 let frame_ready_pending = Rc::new(Cell::new(false));
+                let navigation_generation = Rc::new(Cell::new(0));
+                let navigation_loading = Rc::new(Cell::new(false));
+                let navigation_frame_seen = Rc::new(Cell::new(false));
+                let traced_input_ids: TracedInputIds = Rc::new(std::cell::RefCell::new(
+                    std::collections::HashSet::new(),
+                ));
                 let delegate = Rc::new(HostWebViewDelegate {
+                    traced_input_ids: traced_input_ids.clone(),
                     notifier: self.notifier.clone(),
                     frame_ready_count: frame_ready_count.clone(),
                     frame_ready_pending: frame_ready_pending.clone(),
+                    navigation_generation: navigation_generation.clone(),
+                    navigation_loading: navigation_loading.clone(),
+                    navigation_frame_seen: navigation_frame_seen.clone(),
                 });
                 let webview = WebViewBuilder::new(&self.servo, self.rendering_context.clone())
                     .url(config.initial_url.clone())
@@ -193,12 +300,16 @@ impl ServoHost {
                 self.views.insert(
                     view_id,
                     HostView {
+                        traced_input_ids,
                         webview,
                         config,
                         portable,
                         activity: ActivityState::Dormant,
                         frame_ready_count,
                         frame_ready_pending,
+                        navigation_generation,
+                        navigation_loading,
+                        navigation_frame_seen,
                     },
                 );
                 let _ = reply.send(Ok(view_id));
@@ -218,6 +329,30 @@ impl ServoHost {
                 reply,
             } => {
                 let result = self.with_view_mut(view_id, |view| {
+                    let generation = view.navigation_generation.get().saturating_add(1);
+
+                    // NEROA_NAV_QUARANTINE_RETRY_V2H
+                    //
+                    // Re-arming the quarantine for a navigation already in
+                    // flight discarded the pending exit and cleared
+                    // frame_ready_pending, so repeatedly pressing Go on a
+                    // slow page starved the very frame it was waiting for.
+                    // Retries now keep the in-flight quarantine state.
+                    let already_loading = view.navigation_loading.get();
+
+                    view.navigation_generation.set(generation);
+                    view.navigation_loading.set(true);
+
+                    if !already_loading {
+                        view.navigation_frame_seen.set(false);
+                        view.frame_ready_pending.set(false);
+                    }
+
+                    eprintln!(
+                        "NEROA_NAV_ADAPTER_BEGIN generation={} url={} retry={}",
+                        generation, url, already_loading,
+                    );
+
                     view.webview.load(url.clone());
                     let keep = view.portable.history_index.saturating_add(1);
                     view.portable.history.truncate(keep);
@@ -250,9 +385,14 @@ impl ServoHost {
                 input,
                 reply,
             } => {
+                // NEROA_INPUT_WAKE_COALESCE_V2G
+                //
+                // proxy.send() already woke the host, and drain_commands()
+                // spins Servo's event loop immediately after this returns.
+                // Notifying again only schedules a second wake that drains
+                // an empty queue - two event-loop spins per pointer event.
                 let result = self.dispatch_input(view_id, input);
                 let _ = reply.send(result);
-                self.notifier.notify();
             }
             ServoCommand::SetActivity {
                 view_id,
@@ -332,7 +472,9 @@ impl ServoHost {
                 BrowserInput::PointerMove { position, .. } => {
                     let point = DevicePoint::new(position.x as f32, position.y as f32);
                     view.webview
-                        .notify_input_event(InputEvent::MouseMove(MouseMoveEvent::new(point.into())));
+                        .notify_input_event(InputEvent::MouseMove(MouseMoveEvent::new(
+                            point.into(),
+                        )));
                 }
                 BrowserInput::PointerButton {
                     position,
@@ -352,9 +494,17 @@ impl ServoHost {
                         ButtonState::Released => MouseButtonAction::Up,
                     };
                     let point = DevicePoint::new(position.x as f32, position.y as f32);
-                    view.webview.notify_input_event(InputEvent::MouseButton(
+                    let event_id = view.webview.notify_input_event(InputEvent::MouseButton(
                         MouseButtonEvent::new(action, button, point.into()),
                     ));
+
+                    // NEROA_INPUT_OUTCOME_TRACE_V2H
+                    eprintln!(
+                        "NEROA_INPUT_DISPATCH id={:?} kind=button x={:.1} y={:.1}",
+                        event_id, position.x, position.y,
+                    );
+
+                    view.traced_input_ids.borrow_mut().insert(event_id);
                 }
                 BrowserInput::Scroll {
                     position,
@@ -402,8 +552,7 @@ impl ServoHost {
                     ));
                 }
                 BrowserInput::Text { text } => {
-                    view.webview
-                        .notify_input_event(committed_text_input(text));
+                    view.webview.notify_input_event(committed_text_input(text));
                 }
             }
             Ok(())

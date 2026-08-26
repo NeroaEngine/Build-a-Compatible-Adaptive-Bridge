@@ -1,7 +1,7 @@
 pub mod bridge;
-pub mod compatibility;
 #[cfg(feature = "chromium-runtime")]
 pub mod chromium_runtime;
+pub mod compatibility;
 pub mod diagnostics;
 pub mod engine;
 pub mod input;
@@ -18,14 +18,14 @@ pub mod supervisor;
 pub mod types;
 
 pub use bridge::{AdaptiveBridge, BridgeConfig, BridgeError, NodeSnapshot};
-pub use compatibility::{
-    CompatibilityAction, CompatibilityClassifier, CompatibilityFailure, FailureClass,
-};
 #[cfg(feature = "chromium-runtime")]
 pub use chromium_runtime::{
     ChromiumAcceleratedFrame, ChromiumBackend, ChromiumEngineProxy, ChromiumGpuFrameImporter,
     ChromiumHost, ChromiumHostNotifier, NoChromiumBackend, NoChromiumGpuFrameImporter,
     NoopChromiumHostNotifier,
+};
+pub use compatibility::{
+    CompatibilityAction, CompatibilityClassifier, CompatibilityFailure, FailureClass,
 };
 pub use diagnostics::{BridgeDiagnosticEvent, DiagnosticRing};
 pub use engine::{EngineAdapter, EngineError, LiveWebEngine};
@@ -41,11 +41,12 @@ pub use network::{
 pub use receipt::{JsonlReceiptSink, MemoryReceiptSink, Receipt, ReceiptSink};
 pub use router::{AdaptiveRouter, RouteDecision, RouteRule, RouterConfig};
 #[cfg(feature = "servo-runtime")]
-pub use servo_runtime::{
-    NoopServoHostNotifier, ServoEngineProxy, ServoHost, ServoHostNotifier,
-};
+pub use servo_runtime::{NoopServoHostNotifier, ServoEngineProxy, ServoHost, ServoHostNotifier};
 pub use state_broker::{BrokeredState, StateBrokerError, StateContinuityBroker};
 pub use supervisor::{
     BrowserLifecycleSupervisor, RuntimeRecord, SupervisorConfig, SupervisorDecision,
 };
 pub use types::*;
+
+#[cfg(feature = "servo-runtime")]
+pub use servo_runtime::ServoNavigationAdapter;

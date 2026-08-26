@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 # Rust build/runtime artifacts
 target/
 receipts/
+
+# Pre-git rollback snapshots, superseded by history.
+*.bak

@@ -28,7 +28,8 @@ pub trait ChromiumBackend {
     fn navigate(&mut self, view_id: ViewId, url: &Url) -> Result<(), EngineError>;
     fn resize(&mut self, view_id: ViewId, viewport: &Viewport) -> Result<(), EngineError>;
     fn input(&mut self, view_id: ViewId, input: &BrowserInput) -> Result<(), EngineError>;
-    fn set_activity(&mut self, view_id: ViewId, activity: ActivityState) -> Result<(), EngineError>;
+    fn set_activity(&mut self, view_id: ViewId, activity: ActivityState)
+        -> Result<(), EngineError>;
 }
 
 /// Fail-closed backend used before the concrete CEF host is installed.
@@ -105,11 +106,7 @@ impl ChromiumHost {
         backend: Box<dyn ChromiumBackend>,
         notifier: std::sync::Arc<dyn ChromiumHostNotifier>,
     ) -> (ChromiumEngineProxy, Self) {
-        Self::attach_with_frame_importer(
-            backend,
-            notifier,
-            Rc::new(NoChromiumGpuFrameImporter),
-        )
+        Self::attach_with_frame_importer(backend, notifier, Rc::new(NoChromiumGpuFrameImporter))
     }
 
     pub fn attach_with_frame_importer(
@@ -160,9 +157,9 @@ impl ChromiumHost {
             .ok_or(EngineError::ViewNotFound(view_id))?;
 
         let generation = frame.generation;
-        let surface = self
-            .frame_importer
-            .import_accelerated_frame(view_id, &view.config.viewport, frame)?;
+        let surface =
+            self.frame_importer
+                .import_accelerated_frame(view_id, &view.config.viewport, frame)?;
 
         if let Some(surface) = surface {
             view.latest_surface = Some(surface);
@@ -321,7 +318,11 @@ mod tests {
     struct RecordingBackend;
 
     impl ChromiumBackend for RecordingBackend {
-        fn create_view(&mut self, _view_id: ViewId, _config: &ViewConfig) -> Result<(), EngineError> {
+        fn create_view(
+            &mut self,
+            _view_id: ViewId,
+            _config: &ViewConfig,
+        ) -> Result<(), EngineError> {
             Ok(())
         }
         fn destroy_view(&mut self, _view_id: ViewId) -> Result<(), EngineError> {
@@ -356,10 +357,8 @@ mod tests {
 
     #[tokio::test]
     async fn host_consumes_create_and_export_state_commands() {
-        let (proxy, mut host) = ChromiumHost::attach(
-            Box::new(RecordingBackend),
-            std::sync::Arc::new(|| {}),
-        );
+        let (proxy, mut host) =
+            ChromiumHost::attach(Box::new(RecordingBackend), std::sync::Arc::new(|| {}));
         assert_eq!(proxy.kind(), EngineKind::Chromium);
 
         let create = tokio::spawn({
@@ -384,10 +383,8 @@ mod tests {
 
     #[tokio::test]
     async fn default_host_gpu_path_fails_closed() {
-        let (proxy, mut host) = ChromiumHost::attach(
-            Box::new(RecordingBackend),
-            std::sync::Arc::new(|| {}),
-        );
+        let (proxy, mut host) =
+            ChromiumHost::attach(Box::new(RecordingBackend), std::sync::Arc::new(|| {}));
         let create = tokio::spawn({
             let proxy = proxy.clone();
             async move { proxy.create_view(config()).await }

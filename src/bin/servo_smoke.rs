@@ -83,11 +83,7 @@ impl ApplicationHandler<AppEvent> for App {
         });
     }
 
-    fn user_event(
-        &mut self,
-        _event_loop: &winit::event_loop::ActiveEventLoop,
-        event: AppEvent,
-    ) {
+    fn user_event(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, event: AppEvent) {
         let Self::Running(state) = self else {
             return;
         };
@@ -110,7 +106,11 @@ impl ApplicationHandler<AppEvent> for App {
                     let config = ViewConfig {
                         node_id: Uuid::new_v4(),
                         initial_url: url,
-                        viewport: Viewport::new(size.width.max(1), size.height.max(1), scale_factor),
+                        viewport: Viewport::new(
+                            size.width.max(1),
+                            size.height.max(1),
+                            scale_factor,
+                        ),
                         storage_partition: StoragePartitionId::ephemeral(),
                     };
 
@@ -162,22 +162,20 @@ fn spawn_servo_worker(
             let (wake_tx, wake_rx) = mpsc::channel::<()>();
             let servo_waker = ThreadWaker(wake_tx.clone());
 
-            let rendering_context = match SoftwareRenderingContext::new(
-                winit::dpi::PhysicalSize::new(1000, 700),
-            ) {
-                Ok(context) => Rc::new(context),
-                Err(error) => {
-                    let _ = shell_events.send_event(AppEvent::WorkerFailed(format!(
-                        "software rendering context: {error:?}"
-                    )));
-                    return;
-                }
-            };
+            let rendering_context =
+                match SoftwareRenderingContext::new(winit::dpi::PhysicalSize::new(1000, 700)) {
+                    Ok(context) => Rc::new(context),
+                    Err(error) => {
+                        let _ = shell_events.send_event(AppEvent::WorkerFailed(format!(
+                            "software rendering context: {error:?}"
+                        )));
+                        return;
+                    }
+                };
 
             if let Err(error) = rendering_context.make_current() {
-                let _ = shell_events.send_event(AppEvent::WorkerFailed(format!(
-                    "make current: {error:?}"
-                )));
+                let _ = shell_events
+                    .send_event(AppEvent::WorkerFailed(format!("make current: {error:?}")));
                 return;
             }
 
@@ -204,9 +202,8 @@ fn spawn_servo_worker(
                     Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {
                         host.drain_commands();
 
-                        let current_view = *shared_view_id
-                            .lock()
-                            .expect("shared view id lock poisoned");
+                        let current_view =
+                            *shared_view_id.lock().expect("shared view id lock poisoned");
                         let Some(view_id) = current_view else {
                             continue;
                         };
@@ -214,9 +211,8 @@ fn spawn_servo_worker(
                         let frame_ready = host.take_frame_ready(view_id).unwrap_or(false);
                         if frame_ready {
                             if let Err(error) = host.paint(view_id) {
-                                let _ = shell_events.send_event(AppEvent::WorkerFailed(format!(
-                                    "paint: {error}"
-                                )));
+                                let _ = shell_events
+                                    .send_event(AppEvent::WorkerFailed(format!("paint: {error}")));
                                 return;
                             }
                             rendering_context.present();

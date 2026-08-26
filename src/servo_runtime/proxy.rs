@@ -41,10 +41,7 @@ impl ServoEngineProxy {
         external_gpu_surface: bool,
     ) -> (Self, mpsc::UnboundedReceiver<ServoCommand>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (
-            Self::new(tx, notifier, external_gpu_surface),
-            rx,
-        )
+        (Self::new(tx, notifier, external_gpu_surface), rx)
     }
 
     fn send(&self, command: ServoCommand) -> Result<(), EngineError> {
@@ -55,10 +52,37 @@ impl ServoEngineProxy {
         Ok(())
     }
 
-    async fn await_reply<T>(rx: oneshot::Receiver<Result<T, EngineError>>) -> Result<T, EngineError> {
-        rx.await.map_err(|_| {
-            EngineError::Internal("Servo host dropped command reply".to_string())
-        })?
+    // NEROA_SERVO_DETACHED_NAVIGATION_V1B
+    //
+    // Browser UI/navigation control must never wait for Servo to
+    // complete a document transition.
+    pub fn queue_navigation(&self, view_id: ViewId, url: Url) -> Result<(), EngineError> {
+        let (reply, _reply_rx) = oneshot::channel();
+
+        self.send(ServoCommand::Navigate {
+            view_id,
+            url,
+            reply,
+        })
+    }
+    // NEROA_SERVO_DETACHED_INPUT_V2A
+    //
+    // Browser input is acceptance-only. Native UI must never wait
+    // synchronously for Servo to process a pointer event.
+    pub fn queue_input(&self, view_id: ViewId, input: BrowserInput) -> Result<(), EngineError> {
+        let (reply, _reply_rx) = oneshot::channel();
+
+        self.send(ServoCommand::Input {
+            view_id,
+            input,
+            reply,
+        })
+    }
+    async fn await_reply<T>(
+        rx: oneshot::Receiver<Result<T, EngineError>>,
+    ) -> Result<T, EngineError> {
+        rx.await
+            .map_err(|_| EngineError::Internal("Servo host dropped command reply".to_string()))?
     }
 }
 
