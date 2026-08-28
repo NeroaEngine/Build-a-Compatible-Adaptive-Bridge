@@ -494,26 +494,35 @@ impl ServoHost {
                 let result = self.with_view_mut(view_id, |view| {
                     let generation = view.navigation_generation.get().saturating_add(1);
 
-                    // NEROA_NAV_QUARANTINE_RETRY_V2H
+                    // NEROA_NAV_QUARANTINE_RETRY_V2M
                     //
-                    // Re-arming the quarantine for a navigation already in
-                    // flight discarded the pending exit and cleared
-                    // frame_ready_pending, so repeatedly pressing Go on a
-                    // slow page starved the very frame it was waiting for.
-                    // Retries now keep the in-flight quarantine state.
-                    let already_loading = view.navigation_loading.get();
+                    // Re-arming the quarantine for the SAME url already in
+                    // flight discarded the pending exit and starved the frame
+                    // it was waiting for, so hammering Go on one slow page must
+                    // preserve the in-flight quarantine.
+                    //
+                    // But a DIFFERENT url is not a retry - it is the user
+                    // leaving. Treating it as a retry inherited the previous
+                    // load's quarantine, so if that load never completed (a
+                    // same-url reload of an already-loaded page never fires
+                    // LoadStatus::Complete), every later navigation was stuck
+                    // behind it and the page never changed. A different url
+                    // therefore always resets the quarantine.
+                    let same_url = view.portable.url == url;
+
+                    let retry = view.navigation_loading.get() && same_url;
 
                     view.navigation_generation.set(generation);
                     view.navigation_loading.set(true);
 
-                    if !already_loading {
+                    if !retry {
                         view.navigation_frame_seen.set(false);
                         view.frame_ready_pending.set(false);
                     }
 
                     eprintln!(
                         "NEROA_NAV_ADAPTER_BEGIN generation={} url={} retry={}",
-                        generation, url, already_loading,
+                        generation, url, retry,
                     );
 
                     view.webview.load(url.clone());
