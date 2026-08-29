@@ -72,14 +72,19 @@ pub fn level_for(kind: &str) -> Level {
         | "fluid.content.withheld"
         | "runtime.attested"
         | "runtime.admitted"
-        | "runtime.frozen" => Level::Authority,
+        | "runtime.frozen"
+        | "fabric.audit.verdict" => Level::Authority,
 
         // Data crossing a boundary.
         "browser.navigate"
         | "vscode.file.opened"
         | "vscode.file.edited"
         | "vscode.file.saved"
-        | "code.file.saved" => Level::DataIo,
+        | "code.file.saved"
+        | "fs.fabric.read"
+        | "fs.workspace.read"
+        | "fs.workspace.write"
+        | "fabric.audit.submitted" => Level::DataIo,
 
         // Build and artifact provenance.
         "build.started" | "build.produced" | "artifact.produced" | "code.build" => Level::Build,
@@ -93,7 +98,8 @@ pub fn level_for(kind: &str) -> Level {
         | "vscode.command.run"
         | "vscode.extension.invoked"
         | "code.run"
-        | "code.session.opened" => Level::Application,
+        | "code.session.opened"
+        | "fs.workspace.reset" => Level::Application,
 
         // Unmapped: fail safe to L1, never up to L5.
         _ => Level::Application,

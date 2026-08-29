@@ -91,6 +91,8 @@ required-features = ["servo-runtime"]
 # provide that EGL build path on non-Windows targets.
 [target.'cfg(windows)'.dependencies]
 servo = { version = "=0.5.0", default-features = false, features = ["baked-in-resources", "bundled_freetype", "js_jit", "no-wgl"], optional = true }
+# NEROA_FILE_PICKER_V23: native file-open dialog for <input type=file>.
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_UI_Controls_Dialogs"] }
 
 [target.'cfg(not(windows))'.dependencies]
 servo = { version = "=0.5.0", default-features = false, features = ["baked-in-resources", "bundled_freetype", "js_jit"], optional = true }

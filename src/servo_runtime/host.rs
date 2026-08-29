@@ -108,6 +108,42 @@ impl WebViewDelegate for HostWebViewDelegate {
         crate::agent::apply_update(&self.semantics, &tree_update);
     }
 
+    // NEROA_FILE_PICKER_V23
+    //
+    // Servo hands <input type=file> and any showOpenFilePicker fallback here as
+    // a FilePicker embedder control. Without this it is dropped and the page's
+    // upload does nothing - the "can't upload" gap. Wire it to the native
+    // Windows open dialog. (Directory picking / File System Access API is a
+    // separate, unimplemented Servo feature, so VS Code "Open Folder" still
+    // cannot work - only "Open Files".)
+    fn show_embedder_control(&self, _webview: WebView, control: servo::EmbedderControl) {
+        if let servo::EmbedderControl::FilePicker(mut picker) = control {
+            #[cfg(target_os = "windows")]
+            {
+                let multiple = picker.allow_select_multiple();
+
+                let paths = native_open_file_dialog(multiple);
+
+                if paths.is_empty() {
+                    eprintln!("NEROA_FILE_PICKER_DISMISSED");
+
+                    picker.dismiss();
+                } else {
+                    eprintln!("NEROA_FILE_PICKER_SELECTED count={}", paths.len());
+
+                    picker.select(&paths);
+
+                    picker.submit();
+                }
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                picker.dismiss();
+            }
+        }
+    }
+
     // NEROA_IN_PAGE_NAVIGATION_VISIBILITY_V2M
     fn notify_url_changed(&self, _webview: WebView, url: url::Url) {
         eprintln!("NEROA_WEBVIEW_URL_CHANGED url={}", url);
@@ -225,6 +261,65 @@ fn js_value_to_json(value: &servo::JSValue) -> serde_json::Value {
                 .map(|(key, value)| (key.clone(), js_value_to_json(value)))
                 .collect(),
         ),
+    }
+}
+
+// NEROA_FILE_PICKER_V23: classic Win32 open dialog, no COM init required, so
+// it is safe to call from the Servo host thread. Modal - the host thread blocks
+// while the dialog is open, which is the expected behaviour for a file picker.
+#[cfg(target_os = "windows")]
+fn native_open_file_dialog(multiple: bool) -> Vec<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::UI::Controls::Dialogs::{
+        GetOpenFileNameW, OFN_ALLOWMULTISELECT, OFN_EXPLORER, OFN_FILEMUSTEXIST, OPENFILENAMEW,
+    };
+
+    // Large enough for a directory plus many file names in multiselect.
+    let mut buffer = vec![0u16; 32768];
+
+    let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
+    ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+    ofn.lpstrFile = buffer.as_mut_ptr();
+    ofn.nMaxFile = buffer.len() as u32;
+    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST;
+    if multiple {
+        ofn.Flags |= OFN_ALLOWMULTISELECT;
+    }
+
+    let ok = unsafe { GetOpenFileNameW(&mut ofn) };
+
+    if ok == 0 {
+        return Vec::new();
+    }
+
+    // Parse the result. Single selection: one NUL-terminated full path.
+    // Multiselect: "dir file1 file2  " - the directory, then each file.
+    let mut parts: Vec<Vec<u16>> = Vec::new();
+    let mut current = Vec::new();
+    for &unit in &buffer {
+        if unit == 0 {
+            if current.is_empty() {
+                break;
+            }
+            parts.push(std::mem::take(&mut current));
+        } else {
+            current.push(unit);
+        }
+    }
+
+    let decode = |units: &[u16]| std::ffi::OsString::from_wide(units);
+
+    if parts.len() <= 1 {
+        parts
+            .into_iter()
+            .map(|units| std::path::PathBuf::from(decode(&units)))
+            .collect()
+    } else {
+        let dir = std::path::PathBuf::from(decode(&parts[0]));
+        parts[1..]
+            .iter()
+            .map(|units| dir.join(decode(units)))
+            .collect()
     }
 }
 
