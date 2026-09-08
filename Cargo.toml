@@ -8,7 +8,7 @@ description = "Renderer-independent adaptive web compatibility bridge for the Ne
 [features]
 default = []
 chromium-runtime = []
-headless-http = ["dep:axum"]
+headless-http = ["dep:axum", "dep:image"]
 servo-runtime = [
     "dep:embedder_traits",
     "dep:euclid",
@@ -46,6 +46,7 @@ oauth = [
 async-trait = "0.1"
 axum = { version = "0.8", optional = true }
 glam = "0.30"
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
