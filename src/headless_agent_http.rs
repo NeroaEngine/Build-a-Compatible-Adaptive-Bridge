@@ -21,6 +21,7 @@ use crate::{
 pub struct HeadlessAgentHttpState {
     sessions: HeadlessSessionManager,
     service_token: Option<Arc<str>>,
+    bound_profile_id: Option<Arc<str>>,
 }
 
 impl HeadlessAgentHttpState {
@@ -29,7 +30,20 @@ impl HeadlessAgentHttpState {
         Self {
             sessions,
             service_token: service_token.map(Arc::<str>::from),
+            bound_profile_id: None,
         }
+    }
+
+    /// Bind this Servo worker to exactly one authenticated browser profile.
+    ///
+    /// Servo's current cookie jar is process-scoped. Until the engine exposes
+    /// a proven per-partition cookie/storage implementation, allowing multiple
+    /// authenticated profile IDs in one process could cross-contaminate
+    /// sessions. One worker per profile is the fail-closed production model.
+    #[must_use]
+    pub fn with_bound_profile(mut self, profile_id: Option<String>) -> Self {
+        self.bound_profile_id = profile_id.map(Arc::<str>::from);
+        self
     }
 }
 
@@ -93,6 +107,7 @@ async fn observe(
     Json(request): Json<ObserveRequest>,
 ) -> Result<Json<SpatialPageObservation>, Response> {
     authorize(&state, &headers)?;
+    authorize_profile(&state, &request.profile_id)?;
     let url = Url::parse(&request.url)
         .map_err(|error| bad_request(format!("invalid url: {error}")))?;
     let viewport = Viewport::new(request.width, request.height, request.device_scale_factor);
@@ -122,6 +137,7 @@ async fn action(
     Json(request): Json<ActionRequest>,
 ) -> Result<Json<ActionResponse>, Response> {
     authorize(&state, &headers)?;
+    authorize_profile(&state, &request.profile_id)?;
     let surface = state
         .sessions
         .agent_surface(&request.profile_id)
@@ -193,6 +209,7 @@ async fn close_profile(
     Path(profile_id): Path<String>,
 ) -> Result<StatusCode, Response> {
     authorize(&state, &headers)?;
+    authorize_profile(&state, &profile_id)?;
     if state.sessions.close(&profile_id).await.map_err(engine_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -223,13 +240,32 @@ fn authorize(state: &HeadlessAgentHttpState, headers: &HeaderMap) -> Result<(), 
     }
 }
 
+fn authorize_profile(state: &HeadlessAgentHttpState, profile_id: &str) -> Result<(), Response> {
+    let Some(bound) = &state.bound_profile_id else {
+        return Ok(());
+    };
+
+    if constant_time_eq(profile_id.as_bytes(), bound.as_bytes()) {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorBody {
+                error: "profile_isolation",
+                message: "this headless worker is bound to another browser profile".to_owned(),
+            }),
+        )
+            .into_response())
+    }
+}
+
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
     }
     let mut diff = 0u8;
-    for (a, b) in left.iter().zip(right) {
-        diff |= a ^ b;
+    for (a, b) in left.iter().zip(right.iter()) {
+        diff |= *a ^ *b;
     }
     diff == 0
 }
