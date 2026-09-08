@@ -41,13 +41,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app = router(state);
 
     let listener = TcpListener::bind(bind).await?;
-    tracing_subscriber::fmt()
+
+    // Servo owns the process-wide `log` logger after `servo.setup_logging()`.
+    // `tracing_subscriber::fmt().init()` also tries to install a LogTracer,
+    // which panics with SetLoggerError when Servo has already claimed it.
+    // Install only the tracing subscriber here; leave the `log` facade to Servo.
+    let subscriber = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "neroa_compatible_adaptive_bridge=info".into()),
         )
         .json()
-        .init();
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)
+        .map_err(|error| format!("failed to install tracing subscriber: {error}"))?;
 
     tracing::info!(
         %bind,
