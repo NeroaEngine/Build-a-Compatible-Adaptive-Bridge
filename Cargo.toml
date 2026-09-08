@@ -8,6 +8,7 @@ description = "Renderer-independent adaptive web compatibility bridge for the Ne
 [features]
 default = []
 chromium-runtime = []
+headless-http = ["dep:axum"]
 servo-runtime = [
     "dep:embedder_traits",
     "dep:euclid",
@@ -43,6 +44,7 @@ oauth = [
 
 [dependencies]
 async-trait = "0.1"
+axum = { version = "0.8", optional = true }
 glam = "0.30"
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
@@ -96,4 +98,3 @@ windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_UI_Cont
 
 [target.'cfg(not(windows))'.dependencies]
 servo = { version = "=0.5.0", default-features = false, features = ["baked-in-resources", "bundled_freetype", "js_jit"], optional = true }
-
