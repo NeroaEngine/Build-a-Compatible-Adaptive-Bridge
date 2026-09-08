@@ -11,8 +11,9 @@ use std::{
 
 use embedder_traits::EventLoopWaker;
 use neroa_compatible_adaptive_bridge::{
-    HeadlessSessionManager, ServoHost, ServoHostNotifier,
+    ServoHost, ServoHostNotifier,
     headless_agent_http::{HeadlessAgentHttpState, router},
+    headless_session::HeadlessSessionManager,
 };
 use servo::{RenderingContext, ServoBuilder, SoftwareRenderingContext};
 use tokio::net::TcpListener;
