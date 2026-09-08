@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use serde::Serialize;
 use tokio::sync::RwLock;
 use url::Url;
 use uuid::Uuid;
@@ -13,7 +14,7 @@ use crate::{
     types::{ActivityState, StoragePartitionId, ViewConfig, ViewId, Viewport},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct HeadlessProfileSnapshot {
     pub profile_id: String,
     pub view_id: ViewId,
