@@ -10,6 +10,10 @@ pub mod oauth;
 #[cfg(feature = "ros")]
 pub mod ros;
 
+// Engine C headless capture adapter.
+#[cfg(feature = "headless-http")]
+pub mod headless_http;
+
 pub mod bridge;
 #[cfg(feature = "chromium-runtime")]
 pub mod chromium_runtime;
