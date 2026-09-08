@@ -28,12 +28,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| "127.0.0.1:19091".to_owned())
         .parse()?;
     let service_token = optional_secret("NEROA_HEADLESS_SERVICE_TOKEN_FILE")?;
+    let bound_profile_id = env::var("NEROA_HEADLESS_PROFILE_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
     let bootstrap_width = parse_or("NEROA_HEADLESS_BOOTSTRAP_WIDTH", 1920u32)?;
     let bootstrap_height = parse_or("NEROA_HEADLESS_BOOTSTRAP_HEIGHT", 1080u32)?;
 
     let proxy = spawn_servo_host(bootstrap_width, bootstrap_height)?;
     let sessions = HeadlessSessionManager::new(proxy);
-    let state = HeadlessAgentHttpState::new(sessions, service_token);
+    let state = HeadlessAgentHttpState::new(sessions, service_token)
+        .with_bound_profile(bound_profile_id.clone());
     let app = router(state);
 
     let listener = TcpListener::bind(bind).await?;
@@ -45,7 +49,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .json()
         .init();
 
-    tracing::info!(%bind, "Neroa Spatial Browser headless server listening");
+    tracing::info!(
+        %bind,
+        profile_id = bound_profile_id.as_deref().unwrap_or("unbound-development"),
+        "Neroa Spatial Browser headless server listening"
+    );
     axum::serve(listener, app).await?;
     Ok(())
 }
