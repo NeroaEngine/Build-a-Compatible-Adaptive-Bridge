@@ -14,6 +14,14 @@ pub mod ros;
 #[cfg(feature = "headless-http")]
 pub mod headless_http;
 
+// Authenticated headless browser profile/session control for Engine C.
+#[cfg(all(feature = "headless-http", feature = "servo-runtime"))]
+pub mod headless_session;
+#[cfg(all(feature = "headless-http", feature = "servo-runtime"))]
+pub mod headless_observation;
+#[cfg(all(feature = "headless-http", feature = "servo-runtime"))]
+pub mod headless_agent_http;
+
 pub mod bridge;
 #[cfg(feature = "chromium-runtime")]
 pub mod chromium_runtime;
