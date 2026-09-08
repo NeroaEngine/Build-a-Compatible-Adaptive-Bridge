@@ -88,6 +88,11 @@ name = "servo-smoke"
 path = "src/bin/servo_smoke.rs"
 required-features = ["servo-runtime"]
 
+[[bin]]
+name = "headless-server"
+path = "src/bin/headless_server.rs"
+required-features = ["servo-runtime", "headless-http"]
+
 # Servo rendering backend selection is platform-specific.
 # Windows retains the proven ANGLE/no-wgl path.
 # Linux must not enable mozangle/egl because mozangle 0.6.0 does not
